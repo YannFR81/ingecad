@@ -485,6 +485,51 @@ prompt y las cotas junto al cursor). Son funciones, no teclas: cuando
 existan, la tecla se agrega a `_MODES` / `_build_acad_shortcuts` y al test
 de teclado. Van después del dogfooding de Terreno y antes de publicar.
 
+## 🗓 Sesión 2026-09-22 (ter) — el HATCH que no veía las líneas, el OSNAP que no se reprodujo, y el manual
+
+**Marco: «haz el manual de topografía en ingecad.org, resolvamos el osnap y
+el dibujar hatch»** (los dos reportes del usuario de Bolivia).
+
+**HATCH — hecho, y era una función que faltaba, no un bug de islas.**
+`region_at_point` sólo entendía OBJETOS cerrados (polilínea cerrada,
+círculo, elipse): una habitación dibujada con cuatro LINEs, o una isla de
+cuatro LINEs, daba «No closed boundary found» donde AutoCAD rellena.
+`core/hatch_trace.py` es el BPOLY: cuerdas de toda curva del conjunto de
+contorno, cortadas en sus cruces (barrido ordenado en NumPy), extremos
+muertos podados, la cara alrededor del punto por la regla de la mano
+izquierda desde la primera arista que corta un rayo horizontal, y como
+islas la cara exterior de cada componente que queda dentro más las cajas
+de los textos (el relleno par-impar resuelve las anidadas). El conjunto de
+contorno es **lo que muestra el lienzo**, como el «current viewport» de
+AutoCAD: una entidad que asoma entra entera; pasadas 60 000 cuerdas la
+ventana se cierra alrededor del punto. Medido en planos de colegas:
+7 022 cuerdas en vista, **185 ms** (2,6 s antes de vectorizar: el perfil
+dijo que el 90 % era el bucle de pares en Python); el plano entero de
+Yanque, 24 743 cuerdas, **0,6 s** (77 s antes). 9 tests, uno por la
+ventana real. ⚠️ Semántica que conviene saber: si la vista está tan
+cerca que una pared queda entera fuera de pantalla, no hay contorno —
+AutoCAD hace lo mismo.
+
+**OSNAP al dibujar polilíneas — NO reproducido, y se midió a fondo.** Por
+el controlador real (`on_hover`/`on_click`), PLINE engancha igual que
+LINE en todo lo probado: END/MID de entidades existentes antes y después
+del primer punto, los vértices y puntos medios de la **propia polilínea
+en curso**, con ORTO, POLAR y FORZC encendidos (la referencia gana en los
+tres) y en modo arco. NOD está en los modos de fábrica. Lo que falta es el
+caso exacto del usuario: qué referencia, sobre qué entidad, si el marcador
+aparece y el clic no lo toma, o no aparece. Preguntas enviadas en el
+borrador de WhatsApp; no se tocó código a ciegas.
+
+**El manual: `ingecad.org/manual-topografia`, publicado** (repo `web/`,
+`npx wrangler deploy`). Comando por comando con nombre inglés y español,
+alias, qué pregunta y qué dibuja, el formato del CSV (con la regla nueva
+de N antes de E), el flujo del caso municipal, las capas y un resumen de
+Terreno. El contenido salió del código (`commands.json`, `ui.json`,
+`LAYERS`, los prompts de `tools.py`), no de memoria; se revisó con captura
+headless de Chromium (⚠️ el Chromium snap no puede escribir en
+`/tmp/claude-*`: capturar a `$HOME` y mover). Y otra vez `pkill -f` con el
+patrón en la propia línea de comandos: exit 144. Matar por PID.
+
 ## 🗓 Sesión 2026-09-22 (bis) — «importar puntos no lo logro»: PIMPORT roto en la 0.6.2
 
 **Un usuario de Bolivia (WhatsApp, captura en `~/Imágenes`) reporta:
