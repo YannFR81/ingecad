@@ -485,6 +485,42 @@ prompt y las cotas junto al cursor). Son funciones, no teclas: cuando
 existan, la tecla se agrega a `_MODES` / `_build_acad_shortcuts` y al test
 de teclado. Van después del dogfooding de Terreno y antes de publicar.
 
+## 🗓 Sesión 2026-09-22 (bis) — «importar puntos no lo logro»: PIMPORT roto en la 0.6.2
+
+**Un usuario de Bolivia (WhatsApp, captura en `~/Imágenes`) reporta:
+exportó puntos desde IngeCAD a `puntos.csv` (100 puntos, malla local
+N 1000/E 2000, Z 3600) y al reimportarlos «no lo logro»; la exportación
+«funciona muy bien». También: quiere hacer un video, pide un manual del
+módulo de topografía (no existe: `docs/plugins.md` es para
+contribuidores), y anota dos bugs más para después: **OSNAP no funciona
+al dibujar polilíneas** y **HATCH no detecta islas**.**
+
+**La causa, en dos capas, las dos cazadas con su archivo:**
+1. `ImportOptionsDialog` hacía `setTextFormat(0)`; **PySide6 6.11 (la que
+   lleva el Flatpak, medido: 6.11.2) rechaza el int** → el constructor
+   revienta, PIMPORT muere con traceback antes de leer nada. PEXPORT no
+   tiene diálogo, por eso funcionaba. ⚠️ **La suite no lo veía porque el
+   diálogo nunca se construía**: `test_the_import_tool_reads_a_file_headless`
+   corre sin ventana. Ahora hay un test que abre el diálogo y otro que
+   corre PIMPORT por la ventana real.
+2. Debajo, silencioso: `sniff_order` tomaba «la coordenada mayor es la
+   Norte», y en una malla local (N 1037, E 2003) leía el P,N,E,Z de
+   nuestro propio PEXPORT como P,E,N,Z → **puntos con E y N cambiados**.
+   Ahora el tamaño decide sólo cuando una coordenada tiene un dígito más
+   (una Norte UTM siempre lo tiene); a igual longitud, N antes de E.
+
+⚠️ **Dos trampas del arnés, nuevas:** (1) el complemento se carga por
+ruta como `ingecad_plugin_topografia`, así que parchear
+`plugins.topografia.dialogs` parchea un módulo que la herramienta **no
+usa** (`importlib.import_module("ingecad_plugin_topografia.dialogs")`
+tras crear la ventana); (2) Shiboken ignora un `exec` sobreescrito en la
+subclase (la lección de `QMenu.exec`, otra vez): el fake acepta con
+`QTimer.singleShot(0, self.accept)` desde `__init__` y deja correr el
+`exec` real. Cada una costó un cuelgue de 300 s.
+
+**Consecuencia para el release:** PIMPORT está roto para TODO usuario de
+la 0.6.2 empaquetada. La 0.6.3 espera igual el OK de Marco.
+
 ## 🗓 Sesión 2026-09-22 — el segundo video de Rafael (0.6.2): dos bugs de cotas
 
 **Marco pasó el video de Rafael (17:50 en adelante); se bajó el tramo, se

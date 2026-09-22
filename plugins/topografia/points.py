@@ -74,23 +74,33 @@ def sniff_order(text: str) -> str:
 
     Three numeric columns and nothing before them: ``NEZ`` or ``ENZ``; a
     leading non-numeric or integer cell is the point name (``P...``). N
-    against E is decided by size: in the southern hemisphere a northing is
-    millions and an easting hundreds of thousands, and in the north a
-    northing is still the larger of the two well away from the equator. A
-    file that fools this is one the dialog exists for.
+    against E is decided by size only when the size is telling -- a UTM
+    northing has a digit more than its easting in either hemisphere
+    (8 180 100 against 230 050 in the south, 4 500 000 against 450 000 in
+    the north). Coordinates of the same length, the local grids a station
+    is set up on (N 2000, E 1000), keep the convention every station and
+    PEXPORT write, N before E: a user exported his 100 points and read
+    them back with east and north swapped because 2003 > 1037. A file that
+    fools this is one the dialog exists for.
     """
     for cells in _rows(text):
         numeric = [_is_number(c) for c in cells]
         if len(cells) >= 3 and all(numeric[:3]) and \
                 not (len(cells) >= 4 and all(numeric[:4]) and "." not in cells[0]):
-            first, second = _num(cells[0]), _num(cells[1])
-            base = "NEZ" if abs(first) >= abs(second) else "ENZ"
+            base = "ENZ" if _east_first(cells[0], cells[1]) else "NEZ"
             return base + ("D" if len(cells) > 3 else "")
         if len(cells) >= 4 and all(numeric[1:4]):
-            first, second = _num(cells[1]), _num(cells[2])
-            base = "PNEZ" if abs(first) >= abs(second) else "PENZ"
+            base = "PENZ" if _east_first(cells[1], cells[2]) else "PNEZ"
             return base + ("D" if len(cells) > 4 else "")
     return "PNEZD"
+
+
+def _east_first(first: str, second: str) -> bool:
+    """Is the second of two coordinate cells the northing? Only when it is
+    at least a digit longer than the first; equal lengths say nothing."""
+    a, b = abs(_num(first)), abs(_num(second))
+    digits = lambda v: len(str(int(v))) if v >= 1 else 1
+    return digits(b) > digits(a)
 
 
 def parse_points(text: str, order: str = "PNEZD") -> list[SurveyPoint]:

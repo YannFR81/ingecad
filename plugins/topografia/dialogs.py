@@ -4,6 +4,7 @@
 preview of the first points so a wrong order is seen before it lands."""
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -61,7 +62,7 @@ class ImportOptionsDialog(QDialog):
         form.addRow(tr("Elevation decimals:"), self.decimals)
 
         self.preview = QLabel(self)
-        self.preview.setTextFormat(0)          # plain text
+        self.preview.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.preview)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)

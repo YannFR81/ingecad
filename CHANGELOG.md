@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Fixed
+- **PIMPORT died before importing anything** (a user: "he intentado
+  importar puntos, pero no lo logro; la exportación sí funciona"). The
+  options dialog set its preview's text format with a plain `0`, which
+  the PySide6 the packages ship (6.11) rejects; the dialog never opened
+  and the command ended with a traceback. PEXPORT has no dialog, which is
+  why it worked. The suite had only exercised the tool headless; it now
+  opens the dialog and runs PIMPORT through the window.
+- **An exported points file came back with east and north swapped.** The
+  column sniffer took the larger coordinate for the northing, which on a
+  local grid (N 1037, E 2003) reads PEXPORT's own P,N,E,Z as P,E,N,Z.
+  Size decides only when a coordinate is a digit longer than the other
+  (a UTM northing always is); same-length coordinates keep N before E.
 - **A linear dimension picked right-to-left drew mirrored**: the text
   under the line, the dimension line overshooting the extension lines,
   the arrowheads outside pointing in (a tester's report on 0.6.2). ezdxf

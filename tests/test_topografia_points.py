@@ -366,3 +366,90 @@ def test_the_plugin_is_bundled_on_and_reachable(qapp):
             t.objectName() for t in win.findChildren(type(win._draw_toolbar))]
     finally:
         win.close()
+
+
+# -- a user's own export, read back (2026-09-22) --------------------------------
+
+# What PEXPORT writes for a station set up on a local grid, and what a user
+# sent back saying "importar no lo logro": P,N,E,Z with N < E numerically.
+LOCAL_CSV = ("1,1037.454,2003.143,3601.992\n"
+             "2,1095.071,2063.641,3612.49\n"
+             "3,1073.199,2031.436,3606.618\n")
+
+
+def test_same_length_coordinates_keep_north_before_east():
+    """Size decides N against E only when it is telling (a UTM northing has
+    a digit more). On a local grid the sniffer read E,N because 2003 >
+    1037, so an IngeCAD export came back with east and north swapped."""
+    assert sniff_order(LOCAL_CSV) == "PNEZ"
+    assert sniff_order("1037.454,2003.143,3601.992\n") == "NEZ"
+    # PEXPORT's own output (empty description, trailing delimiter) round-trips
+    points = parse_points(LOCAL_CSV, "PNEZ")
+    exported = format_points(points)
+    assert sniff_order(exported) == "PNEZD"
+    back = parse_points(exported, sniff_order(exported))
+    assert [(p.name, p.north, p.east, p.z) for p in back] \
+        == [(p.name, p.north, p.east, p.z) for p in points]
+    # the UTM cases still decide by size
+    assert sniff_order("1,230050.4,8180100.5,2335.1,BM\n") == "PENZD"
+    assert sniff_order("1,4500000.2,450000.1,812.0\n") == "PNEZ"
+
+
+def test_the_import_dialog_opens_on_a_real_file(qapp):
+    """The options dialog crashed in its constructor under PySide6 6.11
+    (``setTextFormat(0)``: an int where the binding wants the enum), so
+    PIMPORT died before importing anything while PEXPORT, which has no
+    dialog, kept working -- exactly the user's report. The suite never
+    built the dialog: the tool was only exercised headless."""
+    from plugins.topografia.dialogs import ImportOptionsDialog
+
+    dialog = ImportOptionsDialog(None, LOCAL_CSV, sniff_order(LOCAL_CSV))
+    try:
+        assert dialog.order() == "PNEZ"
+        preview = dialog.preview.text()
+        assert "N=1037.454" in preview and "E=2003.143" in preview
+        assert "3 of 3" in preview or "of 3" in preview
+    finally:
+        dialog.deleteLater()
+
+
+def test_pimport_in_the_window_goes_through_the_dialog(qapp, tmp_path, monkeypatch):
+    """PIMPORT as the user runs it: the file picker, the options dialog,
+    the points on the canvas. The picker is answered with the file and the
+    dialog accepts itself; everything else is the real path."""
+    from PySide6.QtCore import QTimer
+
+    from views import file_dialogs
+    from views.main_window import MainWindow
+
+    path = tmp_path / "puntos.csv"
+    path.write_text(LOCAL_CSV, encoding="utf-8")
+    monkeypatch.setattr(file_dialogs, "get_open_file",
+                        lambda *a, **k: str(path))
+    win = MainWindow()
+    # The plugin is loaded by path under its own package name: patching
+    # plugins.topografia.dialogs would patch a module the tool never sees.
+    import importlib
+
+    dialogs_mod = importlib.import_module("ingecad_plugin_topografia.dialogs")
+
+    class Accepting(dialogs_mod.ImportOptionsDialog):
+        # Shiboken ignores a Python override of exec() (the QMenu.exec
+        # lesson): the real modal loop runs, and accepts itself at once.
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            QTimer.singleShot(0, self.accept)
+
+    monkeypatch.setattr(dialogs_mod, "ImportOptionsDialog", Accepting)
+    try:
+        win.new_document()
+        win.tools.start_tool("PIMPORT")
+        msp = win.document.modelspace()
+        points = [e for e in msp if e.dxftype() == "POINT"]
+        assert len(points) == 3
+        first = next(p for p in points if p.dxf.location.z == pytest.approx(3601.992))
+        # N before E: the file's second column is the northing
+        assert (first.dxf.location.x, first.dxf.location.y) \
+            == pytest.approx((2003.143, 1037.454))
+    finally:
+        win.close()
