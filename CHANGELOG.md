@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed
+- **A linear dimension picked right-to-left drew mirrored**: the text
+  under the line, the dimension line overshooting the extension lines,
+  the arrowheads outside pointing in (a tester's report on 0.6.2). ezdxf
+  takes the line's direction from the pick order where AutoCAD follows
+  the dimension's angle; the renderer now receives the origins in
+  reading order -- text from the bottom or the right of the sheet -- so
+  DIMLINEAR and DIMALIGNED draw the same whichever corner is clicked
+  first. The DIMENSION itself keeps the user's order (DIMCONTINUE and
+  DIMBASELINE chain from it).
+- **Dimensions moved to a coloured layer stayed white** (the same
+  report: a red layer "cotas", the dimensions on it, no change). A
+  dimension's block is a block reference in all but name, and AutoCAD
+  resolves its ByBlock strokes and layer-0 content against the
+  dimension; the canvas and the plot now do the same, ISO-25 colours its
+  lines, arrows and text ByBlock as acadiso does (so a colour set on the
+  dimension itself shows too), and the block content follows the
+  dimension onto its new layer in the file, as AutoCAD writes it
+  (measured: 3991 of 3991 block entities in three colleagues' plans). A
+  style whose colours were set ByLayer used to re-render with its lines
+  left on layer 0 -- red text and arrows, white lines -- for the same
+  reason.
+
 ### Added
 - **Czech interface**, a community translation by Michal Josef Špaček
   (PR #2): 817 of the interface's strings, under Tools ▸ Language. The

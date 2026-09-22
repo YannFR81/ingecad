@@ -202,3 +202,78 @@ def test_matchprop_does_not_queue_an_entity_twice(qapp) -> None:
 
     queued = [e.dxf.handle for e in win.tools._pending_render if e.is_alive]
     assert queued.count(drawn.dim.dxf.handle) == 1, queued
+
+
+# -- a dimension's block is drawn in the dimension's own dress ------------------
+
+def _dim_colours(doc, dim) -> set:
+    """Every RGB the scene paints the dimension with (lines, arrowheads,
+    text glyphs), through the same frontend the canvas uses."""
+    import numpy as np
+
+    from render.backend import build_scene
+
+    scene = build_scene(doc, "Model")
+    colours = set()
+    for batch, lo, hi in scene.handle_ranges[dim.dxf.handle]:
+        rgba = getattr(scene, batch).data["rgba"][lo:hi]
+        colours |= {tuple(int(v) for v in c)
+                    for c in np.unique(rgba[:, :3], axis=0)}
+    return colours
+
+
+def test_a_dimension_moved_to_a_layer_takes_that_layers_colour() -> None:
+    """Rafael, 0.6.2: a layer "cotas" in red, the dimensions moved onto
+    it -- and they stayed white. ISO-25 colours its lines, arrows and text
+    ByBlock (AutoCAD's default), which for a dimension's block means "the
+    dimension's own colour"; the frontend resolved it against the canvas
+    instead. Now the *D block is drawn as the block reference it is, and
+    the block content follows the dimension onto its layer in the file, as
+    AutoCAD writes it (3991 of 3991 block entities in three real plans)."""
+    from core import actions, styles
+    from core.commands import History
+    from core.document import Document
+
+    doc = Document.new()
+    doc.doc.layers.add("cotas", color=1)
+    history = History(doc)
+    history.execute(actions.dim_linear((10, 10), (60, 10), (35, 20)))
+    dim = doc.modelspace().query("DIMENSION")[0]
+    white, red, green = (255, 255, 255), (255, 0, 0), (0, 255, 0)
+    assert _dim_colours(doc, dim) == {white}          # control: layer 0
+
+    # the Properties bar gesture: layer, and colour back to ByLayer
+    history.execute(actions.SetPropertyCommand([dim], "layer", "cotas"))
+    history.execute(actions.SetPropertyCommand([dim], "color", 256))
+    assert _dim_colours(doc, dim) == {red}
+    block = doc.doc.blocks.get(dim.dxf.geometry)
+    assert all(e.dxf.layer == "cotas" for e in block
+               if e.dxftype() != "POINT")
+
+    history.undo()
+    history.undo()
+    assert _dim_colours(doc, dim) == {white}
+    assert all(e.dxf.layer == "0" for e in block if e.dxftype() != "POINT")
+    history.redo()
+    history.redo()
+    assert _dim_colours(doc, dim) == {red}
+
+    # the style's second half of his report: with every colour set ByLayer
+    # the text and arrows turned red but the lines stayed white -- the
+    # re-render had left them on layer 0
+    history.execute(styles.SetDimStylePropsCommand(
+        "ISO-25", {"dimclrd": 256, "dimclre": 256, "dimclrt": 256}))
+    assert _dim_colours(doc, dim) == {red}
+
+    # an explicit colour in the style still wins over the dimension's
+    history.execute(styles.SetDimStylePropsCommand("ISO-25", {"dimclrd": 3}))
+    assert _dim_colours(doc, dim) == {red, green}
+
+    # and ByBlock -- acadiso's ISO-25, and 1100 of the 3052 block entities
+    # in a colleague's plan -- means the dimension's OWN colour: the layer's,
+    # or an override set on the dimension itself
+    history.execute(styles.SetDimStylePropsCommand(
+        "ISO-25", {"dimclrd": 0, "dimclre": 0, "dimclrt": 0}))
+    assert _dim_colours(doc, dim) == {red}
+    history.execute(actions.SetPropertyCommand([dim], "color", 3))
+    assert _dim_colours(doc, dim) == {green}

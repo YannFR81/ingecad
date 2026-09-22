@@ -429,10 +429,12 @@ def test_the_text_grip_never_swaps_a_foreign_block():
 
 
 def test_rendered_dim_blocks_wear_the_dims_layer():
-    """ezdxf leaves block geometry BYLAYER-on-layer-0 (white); real
-    AutoCAD files put it on the DIMENSION'S layer with ByLayer color
-    (casa bueno's autopsy). Both our creation path and the re-measuring
-    grip stamp the block that way."""
+    """ezdxf leaves block geometry on layer 0; real AutoCAD files put it
+    on the DIMENSION'S layer (casa bueno's autopsy, and 3991 of 3991 block
+    entities in three more plans). Both our creation path and the
+    re-measuring grip stamp the block that way. The colour is the style's
+    -- ISO-25 says ByBlock, as acadiso does -- and resolves against the
+    dimension either way."""
     from core import actions
     from core.commands import History
 
@@ -448,7 +450,7 @@ def test_rendered_dim_blocks_wear_the_dims_layer():
         lines = [e for e in block if e.dxftype() == "LINE"]
         assert lines
         assert all(e.dxf.layer == "COTAS" for e in lines)
-        assert all(e.dxf.get("color", 256) == 256 for e in lines)
+        assert all(e.dxf.get("color", 256) in (0, 256) for e in lines)
 
     check()
     # the re-measure grip keeps the convention on its fresh block

@@ -29,11 +29,11 @@ COMMON_SCALES = (10, 20, 25, 50, 75, 100, 125, 200, 250, 500, 1000, 2000)
 
 def build_graphics_scene(document, layout_name: str | None = None):
     """Replay a layout into a QGraphicsScene (vector items, world coords)."""
-    from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing import RenderContext
     from ezdxf.addons.drawing.pyqt import PyQtBackend
     from PySide6.QtWidgets import QGraphicsScene
 
-    from render.backend import pick_layout
+    from render.backend import TolerantFrontend, pick_layout
 
     if layout_name and layout_name != "Model" \
             and layout_name in document.doc.layouts:
@@ -45,7 +45,11 @@ def build_graphics_scene(document, layout_name: str | None = None):
     # export_mode: render as plotted — layers with Plot off are skipped
     # (they still display on screen, exactly AutoCAD's Plot column).
     context = RenderContext(document.doc, export_mode=True)
-    Frontend(context, backend).draw_layout(layout, finalize=False)
+    # The canvas's frontend, so the plot obeys the same rules the screen
+    # does: a dimension's block drawn in the dimension's colour (ISO-25 is
+    # ByBlock), MULTILEADER content instead of its baked proxy picture, a
+    # malformed entity skipped instead of blanking the page.
+    TolerantFrontend(context, backend).draw_layout(layout, finalize=False)
     if getattr(layout, "is_any_paperspace", False):
         # Viewport frames plot only when the page setup asks for them
         # (plot_layout_flags bit 1, off by AutoCAD's own default — clean

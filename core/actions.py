@@ -1291,6 +1291,9 @@ def dim_diameter(center, radius: float, location, *, text: str = "<>",
     return AddDimensionCommand(factory)
 
 
+_DIM_TYPES = ("DIMENSION", "ARC_DIMENSION")
+
+
 def _dim_block_shared(document, name: str) -> bool:
     """Is the anonymous *D block still referenced by any dimension?"""
     for e in document.doc.entitydb.values():
@@ -1303,21 +1306,24 @@ def _dim_block_shared(document, name: str) -> bool:
 def _stamp_dim_block_byblock(document, dim) -> None:
     """Make a freshly rendered *D block wear the dimension's own dress.
 
-    Real AutoCAD files (casa bueno's autopsy) write the block geometry on
-    the DIMENSION'S LAYER with ByLayer color — a dim on layer Cota draws
-    Cota's magenta. ezdxf's renderer leaves entities on layer 0 with no
-    color, which resolved white on our canvas after every re-render.
-    Entities the style explicitly colored (dimclrd/e/t as real ACIs) and
-    the Defpoints markers stay untouched.
+    Real AutoCAD files write the block geometry on the DIMENSION'S LAYER
+    (measured on three plans of colleagues: 3991 of 3991 block entities
+    under 593 dimensions, colours ByBlock, ByLayer and explicit mixed).
+    ezdxf's renderer leaves its lines on layer 0. The canvas resolves a
+    dimension's block against the dimension itself, as AutoCAD does (see
+    ``TolerantFrontend.draw_entity``), so this is about the FILE looking
+    the way AutoCAD would have written it, not about what is drawn.
+    Colours are left as the style set them (ByBlock, ByLayer or an ACI:
+    the canvas resolves the first two against the dimension); only the
+    Defpoints markers keep their layer.
     """
     name = dim.dxf.get("geometry", None)
     if not name or name not in document.doc.blocks:
         return
     dim_layer = dim.dxf.get("layer", "0")
     for entity in document.doc.blocks.get(name):
-        if entity.dxf.get("color", 256) == 256 \
-                and entity.dxf.get("layer", "0") == "0":
-            entity.dxf.layer = dim_layer   # ByLayer now means the dim's layer
+        if entity.dxf.get("layer", "0") == "0" and entity.dxftype() != "POINT":
+            entity.dxf.layer = dim_layer
 
 
 def translate_dim_text(document, dim, dx: float, dy: float,
@@ -1394,6 +1400,32 @@ def _drop_dim_block(document, name) -> None:
             document.doc.blocks.delete_block(name, safe=False)
         except Exception:
             pass
+
+
+def rerender_dimension(document, dim) -> None:
+    """Draw a dimension's *D block afresh (a changed style, MATCHPROP, an
+    edited property): render, dress the block as AutoCAD writes it, drop
+    the superseded block unless another dimension still shares it."""
+    old_block = dim.dxf.get("geometry", None)
+    dim.render()
+    _stamp_dim_block_byblock(document, dim)
+    _drop_dim_block(document, old_block)
+
+
+def _redress_dim_block(document, dim, old_layer: str, new_layer: str) -> list:
+    """The dimension moved from ``old_layer`` to ``new_layer``: its block
+    content follows, as AutoCAD's does (it re-renders the block on every
+    change, so the block always sits on the dimension's layer). Returns
+    the entities moved, for undo."""
+    name = dim.dxf.get("geometry", None)
+    if not name or name not in document.doc.blocks or old_layer == new_layer:
+        return []
+    moved = []
+    for entity in document.doc.blocks.get(name):
+        if entity.dxf.get("layer", "0") == old_layer:
+            entity.dxf.layer = new_layer
+            moved.append(entity)
+    return moved
 
 
 def _block_text_rotation(entity) -> float:
@@ -1993,12 +2025,23 @@ class SetPropertyCommand(Command):
         self.prop = prop
         self.value = value
         self._old = []
+        # (dimension block entity, its layer before) -- a dimension's block
+        # follows the dimension onto its new layer, as AutoCAD's does; a
+        # tester who moved his dimensions to a red layer "cotas" saw them
+        # stay white because the block content had stayed on layer 0.
+        self._redressed: list = []
 
     def do(self, document) -> None:
         self._old = []
+        self._redressed = []
         for e in self.entities:
-            self._old.append(e.dxf.get(self.prop, None))
+            old = e.dxf.get(self.prop, None)
+            self._old.append(old)
             e.dxf.set(self.prop, self.value)
+            if self.prop == "layer" and e.dxftype() in _DIM_TYPES:
+                self._redressed.extend(
+                    (blk_entity, old or "0") for blk_entity in
+                    _redress_dim_block(document, e, old or "0", self.value))
         document.dirty = True
 
     def undo(self, document) -> None:
@@ -2007,6 +2050,9 @@ class SetPropertyCommand(Command):
                 e.dxf.discard(self.prop)
             else:
                 e.dxf.set(self.prop, old)
+        for blk_entity, layer in self._redressed:
+            if blk_entity.is_alive:
+                blk_entity.dxf.layer = layer
         document.dirty = True
 
 

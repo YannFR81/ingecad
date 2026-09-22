@@ -592,6 +592,9 @@ def _rect_covers_model(rect, vp) -> bool:
             and rect[2] >= x1 and rect[3] >= y1)
 
 
+_DIMENSION_TYPES = frozenset(("DIMENSION", "ARC_DIMENSION"))
+
+
 class TolerantFrontend(Frontend):
     """Frontend that survives malformed entities.
 
@@ -716,6 +719,16 @@ class TolerantFrontend(Frontend):
         # invisible to hide_handles and inherit the wrong kind/group.
         backend = getattr(self.pipeline, "backend", None)
         depth = len(getattr(backend, "_open", ()))
+        # A dimension's *D block is a block reference in all but name:
+        # AutoCAD resolves its ByBlock strokes (ISO-25's default for lines,
+        # arrows and text) and its layer-0 content against the DIMENSION
+        # itself, which is how a dimension moved to a red layer turns red.
+        # ezdxf pushes that context for INSERT only; without it every
+        # ByBlock stroke resolved to the canvas default -- white on any
+        # layer, whatever the dimension's own colour said.
+        as_block = entity.dxftype() in _DIMENSION_TYPES
+        if as_block:
+            self.ctx.push_state(properties)
         try:
             super().draw_entity(entity, properties)
         except Exception as exc:
@@ -725,6 +738,9 @@ class TolerantFrontend(Frontend):
             logger.warning("skipped unrenderable entity %s", note)
             while backend is not None and len(backend._open) > depth:
                 backend.exit_entity(entity)
+        finally:
+            if as_block:
+                self.ctx.pop_state()
 
 
 def frontend_config(flatten: float) -> Configuration:

@@ -112,9 +112,11 @@ def _preview_scale(attribs: dict) -> float:
 def render_dim_preview(attribs: dict, w: int = 300, h: int = 190) -> QPixmap:
     """A real sample render of the style: linear + angular + radius dims."""
     import ezdxf
-    from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing import RenderContext
     from ezdxf.addons.drawing.pyqt import PyQtBackend
     from PySide6.QtWidgets import QGraphicsScene
+
+    from render.backend import TolerantFrontend
 
     pm = QPixmap(w, h)
     pm.fill(_PREVIEW_BG)
@@ -165,7 +167,8 @@ def render_dim_preview(attribs: dict, w: int = 300, h: int = 190) -> QPixmap:
                 pass
         scene = QGraphicsScene()
         backend = PyQtBackend(scene)
-        Frontend(RenderContext(doc), backend).draw_layout(msp, finalize=False)
+        TolerantFrontend(RenderContext(doc), backend).draw_layout(
+            msp, finalize=False)
         backend.finalize()
         source = scene.itemsBoundingRect()
         if source.isEmpty():

@@ -750,12 +750,9 @@ class MatchPropCommand(Command):
 
 
 def _rerender_dimension(document, dim) -> None:
-    from core.actions import _drop_dim_block, _stamp_dim_block_byblock
+    from core.actions import rerender_dimension
 
-    old_block = dim.dxf.get("geometry", None)
-    dim.render()
-    _stamp_dim_block_byblock(document, dim)
-    _drop_dim_block(document, old_block)
+    rerender_dimension(document, dim)
 
 
 def _drop_block(document, name) -> None:

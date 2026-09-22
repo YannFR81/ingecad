@@ -38,6 +38,12 @@ ISO25_DIM = {
     # unset DIMTMOVE as 2 -- writing them makes the file say it.
     "dimtofl": 1, "dimtix": 0, "dimatfit": 3, "dimtmove": 0,
     "dimtih": 0, "dimtoh": 0, "dimcen": 2.5,
+    # Colours ByBlock, as acadiso's ISO-25: the dimension line, extension
+    # lines and text take the DIMENSION's own colour -- its layer's, or an
+    # override set on it -- so a dimension moved to a red layer turns red.
+    # Unset, ezdxf wrote ByLayer on the block content, which followed the
+    # layer but never the dimension's own colour.
+    "dimclrd": 0, "dimclre": 0, "dimclrt": 0,
 }
 
 
@@ -273,19 +279,17 @@ def rerender_dimensions(document, style_name: str) -> None:
     """Re-render every dimension that uses ``style_name`` — AutoCAD applies a
     modified style to the dimensions drawn with it. Superseded *D blocks are
     dropped unless shared (dimensions inside block references share theirs)."""
-    from core.actions import _drop_dim_block
+    from core.actions import rerender_dimension
 
     for e in list(document.doc.entitydb.values()):
         if not e.is_alive or e.dxftype() not in ("DIMENSION", "ARC_DIMENSION"):
             continue
         if e.dxf.get("dimstyle", None) != style_name:
             continue
-        old_block = e.dxf.get("geometry", None)
         try:
-            e.render()
+            rerender_dimension(document, e)
         except Exception:
             continue
-        _drop_dim_block(document, old_block)
 
 
 class SetDimStylePropsCommand(Command):

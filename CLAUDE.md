@@ -485,6 +485,59 @@ prompt y las cotas junto al cursor). Son funciones, no teclas: cuando
 existan, la tecla se agrega a `_MODES` / `_build_acad_shortcuts` y al test
 de teclado. Van después del dogfooding de Terreno y antes de publicar.
 
+## 🗓 Sesión 2026-09-22 — el segundo video de Rafael (0.6.2): dos bugs de cotas
+
+**Marco pasó el video de Rafael (17:50 en adelante); se bajó el tramo, se
+extrajo un frame cada 8 s y se transcribió el audio con faster-whisper
+(los subtítulos de YouTube dieron 429).** Rafael dice que IngeCAD «funciona
+brutal», que el polar y su panel están «genial», que no lo abandone porque
+Open CAD Studio podría pasar a ser de pago, y reporta **dos bugs**, los dos
+reproducidos en código antes de tocar nada:
+
+- **DIMLINEAR de derecha a izquierda salía espejada** (texto abajo, línea
+  de cota pasada de las de referencia, flechas por fuera apuntando
+  adentro). ezdxf toma la dirección de defpoint2→defpoint3; AutoCAD sigue
+  el ángulo. `core/ezdxf_patches._patch_linear_dimension_direction`: el
+  constructor de `LinearDimension` recibe el ángulo plegado a (-90, 90]
+  (`reading_angle`: texto legible desde abajo o desde la derecha) y los
+  orígenes en ese orden, y la entidad los recupera después — DIMCONTINUE y
+  DIMBASELINE encadenan desde el orden del usuario. DIMALIGNED al revés
+  tenía además el texto **boca abajo** (rotación 180). Ahora los dos
+  órdenes dan bloques idénticos, medido en test, lineal y alineada, H y V.
+- **Las cotas movidas a una capa roja seguían blancas.** Tres causas
+  apiladas: (1) el frontend no daba el contexto de referencia a bloque a
+  una DIMENSION (ezdxf sólo lo empuja para INSERT), así que ByBlock y la
+  capa 0 del bloque `*D` resolvían contra el lienzo; (2) la semilla ISO-25
+  no escribía dimclrd/e/t y ezdxf dejaba el contenido ByLayer en capa 0;
+  (3) al cambiar la capa de la cota, su bloque se quedaba en la vieja, y
+  `rerender_dimensions` (cambio de estilo) no lo vestía — de ahí la segunda
+  mitad del reporte: estilo PorCapa → texto y flechas rojas, líneas
+  blancas. Ahora `TolerantFrontend.draw_entity` empuja la cota como
+  bloque, ISO-25 dice ByBlock como acadiso (una cota con color propio
+  también lo muestra), `SetPropertyCommand("layer")` lleva el bloque
+  consigo (con undo) y hay UN `actions.rerender_dimension` para estilo,
+  MATCHPROP y Propiedades. **Medido en tres planos reales: AutoCAD
+  escribe el bloque en la capa de la cota en 3991 de 3991 entidades**;
+  el stamp se queda por eso, y viste toda entidad de capa 0, no sólo las
+  ByLayer.
+
+⚠️ **Lo que destapó la captura, no la suite:** el PDF/PLOT y la vista
+previa del estilo de cota usaban el `Frontend` pelado de ezdxf, así que
+con la semilla ByBlock **las cotas propias se habrían impreso en el color
+por defecto de la hoja**. Los dos pasan ahora por `TolerantFrontend`
+(una pregunta, un lugar: la regla «el bloque de la cota se dibuja en el
+contexto de la cota» vive en un solo frontend), con test de que el
+`QGraphicsScene` del plot pinta la cota en rojo. Y una honestidad de
+medida: en los dos planos de colegas el contexto **no cambia ningún
+color** (su contenido es ByLayer sobre la capa de la cota; el ByBlock que
+conté era de los POINT de Defpoints) — el arreglo vale para las cotas que
+IngeCAD crea y para los colores propios de una cota, no para esos planos.
+
+Prueba inversa hecha (las dos correcciones apagadas: fallan los tests
+nuevos). Sin publicar: va a la 0.6.3 con el OK de Marco. **El CSV de
+puntos que Marco dijo que estaba en Descargas no estaba** (nada `.csv`
+en `~/Descargas` ni en `rafael.zip`).
+
 ## 🗓 Sesión 2026-09-16 (quater) — tanda D: origen, LASTPOINT, cursor pintado, la fila de la capa nueva
 
 **Marco: «hagamos la tanda D» (7fbeb97).** Los tres puntos que quedaban

@@ -101,3 +101,31 @@ def test_build_scene_layout_by_name():
     assert model_scene.lines.vertex_count > 0
     assert sheet_scene.lines.vertex_count > 0
     assert sheet_scene.background is not None   # paper-white layout
+
+
+def test_plot_draws_a_dimension_in_the_dimensions_colour(qapp) -> None:
+    """The plot replays the drawing through the canvas's frontend, so a
+    dimension's block -- ByBlock in ISO-25 -- is drawn in the dimension's
+    colour on paper as on screen. Through ezdxf's stock Frontend the same
+    scene came out entirely in the page's default colour."""
+    from core import actions
+    from core.commands import History
+    from core.document import Document
+    from formats.pdf_out import build_graphics_scene
+
+    document = Document.new()
+    document.doc.layers.add("cotas", color=1)
+    document.doc.header["$CLAYER"] = "cotas"
+    History(document).execute(actions.dim_linear((0, 0), (50, 0), (25, 10)))
+    scene = build_graphics_scene(document, "Model")
+    from PySide6.QtCore import Qt
+
+    colours = set()
+    for item in scene.items():
+        pen = getattr(item, "pen", None)
+        if pen is not None and pen().style() != Qt.PenStyle.NoPen:
+            colours.add(pen().color().name())
+        brush = getattr(item, "brush", None)
+        if brush is not None and brush().style() != Qt.BrushStyle.NoBrush:
+            colours.add(brush().color().name())
+    assert colours == {"#ff0000"}

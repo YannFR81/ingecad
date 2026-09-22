@@ -28,6 +28,7 @@ def apply() -> None:
     _patch_bold_italic_font_matching()
     _patch_lwpolyline_get_points()
     _patch_radial_dimension_layout()
+    _patch_linear_dimension_direction()
 
 
 def _patch_polygon_transform() -> None:
@@ -326,3 +327,67 @@ def _patch_radial_dimension_layout() -> None:
         cls.render_user_location = user
         cls.render_default_location = default
         cls.get_default_text_location = text
+
+
+def _patch_linear_dimension_direction() -> None:
+    """DIMLINEAR / DIMALIGNED picked right-to-left must draw the same.
+
+    AutoCAD draws a linear dimension's text readable from the bottom or the
+    right of the sheet (ISO 129-1; DIMTIH/DIMTOH 0), above the dimension
+    line in that reading direction, and the pick order of the two origins
+    changes nothing about it. ezdxf's LinearDimension takes the direction
+    from defpoint2 -> defpoint3 and the text rotation from the raw angle,
+    so origins picked against the reading direction render mirrored: the
+    text under the line (upside down for an aligned one), the dimension
+    line overshooting the extension lines, the arrowheads outside pointing
+    in. A tester who dimensioned a rectangle from its right corner to its
+    left one got exactly that ("la cota debajo y las flechas por fuera"),
+    and nobody looks at which corner they click first.
+
+    The renderer reads the angle and the two origins once, in its
+    constructor, so they are handed to it normalised -- the angle folded
+    into (-90, 90], the origins in that direction's order -- and restored
+    on the entity afterwards: the DIMENSION keeps the user's order and
+    angle (DIMCONTINUE and DIMBASELINE chain from them), only the *D block
+    is drawn the way AutoCAD draws it.
+    """
+    from ezdxf.render.dim_linear import LinearDimension
+
+    if getattr(LinearDimension.__init__, "_ingecad_patch", False):
+        return
+    original = LinearDimension.__init__
+
+    def __init__(self, dimension, ucs=None, override=None):
+        dxf = dimension.dxf
+        raw_angle = float(dxf.get("angle", 0.0))
+        angle = reading_angle(raw_angle)
+        p1 = _Vec2(dxf.get("defpoint2", (0, 0)))
+        p2 = _Vec2(dxf.get("defpoint3", (0, 0)))
+        against = (p2 - p1).dot(_Vec2.from_deg_angle(angle)) < 0.0
+        folded = abs(angle - raw_angle) > 1e-9
+        if against:
+            dxf.defpoint2, dxf.defpoint3 = dxf.defpoint3, dxf.defpoint2
+        if folded:
+            dxf.angle = angle
+        try:
+            original(self, dimension, ucs, override)
+        finally:
+            if against:
+                dxf.defpoint2, dxf.defpoint3 = dxf.defpoint3, dxf.defpoint2
+            if folded:
+                dxf.angle = raw_angle
+
+    __init__._ingecad_patch = True
+    LinearDimension.__init__ = __init__
+
+
+def reading_angle(angle: float) -> float:
+    """The direction a dimension line of ``angle`` degrees is READ along:
+    the same line folded into (-90, 90], so its text reads from the bottom
+    or from the right of the sheet (AutoCAD's rule for aligned text)."""
+    a = angle % 360.0
+    if 90.0 < a <= 270.0:
+        a -= 180.0
+    elif a > 270.0:
+        a -= 360.0
+    return a
