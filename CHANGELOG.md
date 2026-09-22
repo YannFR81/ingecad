@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Fixed
+- **HATCH finds boundaries drawn with lines and arcs, islands included**
+  (a user: "al dibujar el HATCH no detecta las islas"). Pick-internal-point
+  only knew closed objects -- a closed polyline, a circle -- so a room
+  drawn as four lines, or an island drawn as four lines, answered "No
+  closed boundary found" where AutoCAD fills. The region is now traced the
+  way BPOLY does: every curve in view is cut where it crosses another,
+  dead ends fall away, the smallest face around the point is the
+  boundary and whatever lies inside it (loops of lines, circles, text) is
+  an island. The boundary set is what the canvas shows, as AutoCAD's
+  "current viewport"; on a colleague's 10 000-entity plan a pick answers
+  in 0.2-0.6 s.
 - **PIMPORT died before importing anything** (a user: "he intentado
   importar puntos, pero no lo logro; la exportación sí funciona"). The
   options dialog set its preview's text format with a plain `0`, which

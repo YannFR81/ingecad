@@ -2,12 +2,13 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeCAD contributors.
 """Boundary detection for HATCH — AutoCAD's "Pick internal point".
 
-Click inside an area and AutoCAD finds the surrounding boundary. We resolve
-the common, robust case: the smallest closed object (polyline / circle /
-ellipse) that contains the point becomes the outer boundary, and any closed
-objects nested inside it become islands (holes) — exactly the "Normal" island
-style. Boundaries built from unclosed crossing fragments are out of scope for
-now (AutoCAD needs gap tolerance there too).
+Click inside an area and AutoCAD finds the surrounding boundary. The region
+is traced from every curve in view by ``core.hatch_trace`` (lines, arcs and
+polylines cut at their crossings; the smallest face around the point; what
+lies inside it as islands). This module keeps the closed-object rule as the
+fallback: the smallest closed object (polyline / circle / ellipse) that
+contains the point is the outer boundary, closed objects nested inside it
+are islands (holes) — the "Normal" island style.
 """
 from __future__ import annotations
 
@@ -74,13 +75,31 @@ def point_in_polygon(poly: list[Point], pt: Point) -> bool:
     return inside
 
 
-def region_at_point(entities, point: Point):
+def region_at_point(entities, point: Point, window=None):
     """Return (outer_polygon, [island_polygons]) for the region under ``point``.
 
-    None if no closed boundary contains the point. The outer boundary is the
-    smallest closed object containing the point; islands are the closed
-    objects nested inside it (which the point is NOT inside).
+    None if nothing encloses the point. The region is traced from every
+    curve in the boundary set (``core.hatch_trace``: lines and arcs cut at
+    their crossings, the smallest face around the point, whatever lies
+    inside it as islands -- AutoCAD's BPOLY). ``window`` = (x0, y0, x1, y1)
+    limits that set, like AutoCAD's current viewport. Should the tracer
+    find nothing, the closed-object rule below still answers: the smallest
+    closed object containing the point, the closed objects nested in it
+    as islands.
     """
+    from core.hatch_trace import trace_region
+
+    entities = list(entities)
+    try:
+        traced = trace_region(entities, point, window)
+    except Exception:
+        traced = None
+    if traced is not None:
+        return traced
+    return _closed_object_region(entities, point)
+
+
+def _closed_object_region(entities, point: Point):
     containing = []
     polys = []
     for e in entities:

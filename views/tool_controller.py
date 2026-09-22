@@ -946,13 +946,31 @@ class ToolController(QObject):
         return None
 
     def hatch_region_at(self, point):
-        """(outer_polygon, [island_polygons]) under a Pick-internal-point."""
+        """(outer_polygon, [island_polygons]) under a Pick-internal-point.
+
+        The boundary set is what the canvas shows, as AutoCAD's default
+        (HPBOUND = current viewport): a region is traced from every curve
+        in view, lines and arcs included, not only from closed objects.
+        """
         from core.hatch_boundary import region_at_point
 
         if self.window.document is None:
             return None
         return region_at_point(
-            list(self.window.document.modelspace()), point)
+            list(self.window.document.modelspace()), point,
+            window=self._visible_space_rect())
+
+    def _visible_space_rect(self):
+        """The canvas in coordinates of the current space, or None headless."""
+        viewport = getattr(self.window, "viewport", None)
+        view = getattr(viewport, "view", None)
+        if view is None or not view.width or not view.height:
+            return None
+        corners = [view.screen_to_world(0, 0),
+                   view.screen_to_world(view.width, view.height)]
+        pts = [self.to_space(x, y) for x, y in corners]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        return (min(xs), min(ys), max(xs), max(ys))
 
     def block_names(self) -> list:
         """User block definitions (not *Model_Space/*Paper_Space/anonymous).
