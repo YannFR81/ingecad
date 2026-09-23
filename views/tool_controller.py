@@ -1839,6 +1839,15 @@ class ToolController(QObject):
                 except Exception:
                     pass
 
+    def _preview_now(self) -> None:
+        """Rebuild the rendered preview for the current cursor (a tool step
+        changed what the next click creates), or drop it."""
+        self._preview_key = None
+        if self.tool is not None and self._cursor is not None:
+            self._sync_preview(*self._cursor)
+        else:
+            self._clear_preview()
+
     def _clear_preview(self) -> None:
         if self._preview_key is not None:
             self._preview_key = None
@@ -1975,6 +1984,10 @@ class ToolController(QObject):
         self._note_point(point)
         self.tool.on_point(point)
         self.clear_tracking()          # AutoCAD releases the acquired points with the point
+        # The step may have made a preview possible (the second origin of a
+        # dimension): build it now, not on the next mouse move -- in between
+        # the canvas showed the schematic stand-in, text centred on the line.
+        self._preview_now()
         self.changed.emit()
 
     @property
@@ -2471,6 +2484,7 @@ class ToolController(QObject):
             self.changed.emit()
             return True
         if self.tool.on_option(stripped):
+            self._preview_now()        # a Text/Angle/Horizontal option changes the picture
             self.changed.emit()
             return True
         direction = None

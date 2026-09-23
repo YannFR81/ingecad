@@ -329,6 +329,8 @@ def test_the_dimension_preview_is_the_dimension_the_click_leaves(qapp) -> None:
         t.on_click(0, 0)
         t.on_hover(50, 0, threshold_world=1.0)
         t.on_click(50, 0)
+        # the click itself builds the preview: nothing else shows meanwhile
+        assert win.viewport._preview_scene is not None
         t.on_hover(25, 10, threshold_world=1.0)
         preview = win.viewport._preview_scene
         assert preview is not None and preview.lines.vertex_count > 0

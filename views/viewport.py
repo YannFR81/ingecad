@@ -1620,6 +1620,13 @@ class Viewport(QOpenGLWidget):
             p.setPen(QPen(border, 1, Qt.DashLine if crossing else Qt.SolidLine))
             p.drawRect(sx1, sy1, sx2 - sx1, sy2 - sy1)
 
+    def _renders_previews(self) -> bool:
+        """Does the active tool hand over rendered previews? Then the
+        schematic never shows, not even for the frame between a click and
+        the first hover: a wrong picture is worse than none."""
+        tool = getattr(self.tool_delegate, "tool", None)
+        return getattr(tool, "preview_command", None) is not None
+
     def _draw_tool_preview(self, p: QPainter) -> None:
         delegate = self.tool_delegate
         preview_color = (QColor(90, 90, 90) if self._light_background()
@@ -1628,8 +1635,8 @@ class Viewport(QOpenGLWidget):
         p.setPen(pen)
         dim = delegate.preview_dimension()
         if dim is not None:
-            if self._preview_scene is None:
-                # no rendered preview (headless): the schematic stands in
+            if self._preview_scene is None and not self._renders_previews():
+                # no rendered preview possible: the schematic stands in
                 self._draw_dim_preview(p, dim, preview_color)
             marker = getattr(delegate.tool, "align_marker", None)
             if marker is not None:
