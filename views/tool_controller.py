@@ -1016,6 +1016,7 @@ class ToolController(QObject):
         if self._ghost_on:
             self._ghost_on = False
             self.window.viewport.set_ghost_scene(None)
+        self._clear_preview()
         self.changed.emit()
 
     def cancel(self) -> None:
@@ -1639,6 +1640,7 @@ class ToolController(QObject):
         self._track_tolerance = threshold_world
         self._watch_for_acquisition()
         self._sync_ghost(wx, wy)
+        self._sync_preview(wx, wy)
 
     # -- object snap tracking (OTRACK) ----------------------------------------
     def _watch_for_acquisition(self) -> None:
@@ -1776,6 +1778,71 @@ class ToolController(QObject):
         near.sort(key=lambda n: n[0])
         _d, src, ang, point = near[0]
         return point, src, f"{_track_label(src[2])}: <{math.degrees(ang):.0f}°"
+
+    # -- the rendered preview of what the next click creates --------------------
+    _preview_key = None
+
+    def _sync_preview(self, wx: float, wy: float) -> None:
+        """A dimension being placed is previewed as the dimension the click
+        will leave -- rendered through the real style, so the text sits
+        where it will sit (Marco: the schematic preview centred the text
+        on the line while ISO-25 puts it above). The tool hands over the
+        very command the click would run; it is run against the document
+        and taken back at once, and the entity's picture is kept."""
+        tool = self.tool
+        fn = getattr(tool, "preview_command", None) if tool is not None else None
+        if fn is None or self.window.document is None:
+            self._clear_preview()
+            return
+        point = self.resolved_point(wx, wy)
+        key = (id(tool), round(point[0], 9), round(point[1], 9),
+               getattr(tool, "_text", None), getattr(tool, "_text_rotation", None),
+               getattr(tool, "_forced_angle", None))
+        if key == self._preview_key:
+            return
+        command = fn(point)
+        if command is None:
+            self._clear_preview()
+            return
+        try:
+            scene = self._preview_scene_for(command)
+        except Exception:
+            scene = None
+        self._preview_key = key
+        self.window.viewport.set_preview_scene(scene)
+
+    def _preview_scene_for(self, command):
+        """Create the command's entity, picture it, remove it: no revision
+        bump, no dirty flag, no history -- the document is as it was."""
+        from render.backend import build_scene_for_entities
+
+        document = self.window.document
+        factory = getattr(command, "_factory", None)
+        if factory is None:
+            return None
+        space = command.space(document)
+        override = factory(space, document)
+        override.render()
+        entity = override.dimension
+        block = entity.dxf.get("geometry", None)
+        try:
+            current = document.doc.header.get("$CLAYER", "0")
+            if current in document.doc.layers:
+                entity.dxf.layer = current
+            return build_scene_for_entities(document, [entity], self._flatten,
+                                            self.canvas_space())
+        finally:
+            space.delete_entity(entity)
+            if block and block in document.doc.blocks:
+                try:
+                    document.doc.blocks.delete_block(block, safe=False)
+                except Exception:
+                    pass
+
+    def _clear_preview(self) -> None:
+        if self._preview_key is not None:
+            self._preview_key = None
+            self.window.viewport.set_preview_scene(None)
 
     def _sync_ghost(self, wx: float, wy: float) -> None:
         """MOVE/COPY/PASTE drag preview: the tool exposes ghost_entities +

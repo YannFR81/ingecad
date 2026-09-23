@@ -227,6 +227,12 @@ class Viewport(QOpenGLWidget):
         self._overlay_scene: Optional[Scene] = None
         self._overlay_dirty = False
         self._overlay_bufs: dict[str, tuple] = {}
+        # The rendered preview of the entity a tool is about to create (a
+        # dimension while its line is being placed): the real thing,
+        # rebuilt per hover, drawn like the overlay.
+        self._preview_scene: Optional[Scene] = None
+        self._preview_dirty = False
+        self._preview_bufs: dict[str, tuple] = {}
         # Ghost preview (MOVE/COPY/PASTE drag): tessellated ONCE, then only a
         # per-frame translation in the MVP — no rebuild while the mouse moves.
         self._ghost_scene: Optional[Scene] = None
@@ -341,6 +347,14 @@ class Viewport(QOpenGLWidget):
         """Freshly drawn entities, rendered on top of the base scene."""
         self._overlay_scene = scene
         self._overlay_dirty = True
+        self.update()
+
+    def set_preview_scene(self, scene: Optional[Scene]) -> None:
+        """What the next click will create, rendered for real."""
+        if scene is None and self._preview_scene is None:
+            return
+        self._preview_scene = scene
+        self._preview_dirty = True
         self.update()
 
     def set_ghost_scene(self, scene: Optional[Scene]) -> None:
@@ -590,7 +604,8 @@ class Viewport(QOpenGLWidget):
         self.makeCurrent()
         try:
             holders = [self._scene_bufs, self._paper_bufs,
-                       self._overlay_bufs, self._ghost_bufs]
+                       self._overlay_bufs, self._preview_bufs,
+                       self._ghost_bufs]
             for bufs in holders:
                 for vao, vbo, *_ in bufs.values():
                     vbo.destroy()
@@ -915,6 +930,8 @@ class Viewport(QOpenGLWidget):
             self._flush_hidden_ranges()
         if self._overlay_dirty:
             self._upload_overlay()
+        if self._preview_dirty:
+            self._upload_preview()
         if self._ghost_dirty:
             self._upload_ghost()
 
@@ -1039,6 +1056,28 @@ class Viewport(QOpenGLWidget):
             if scissored:
                 gl.glDisable(GL_SCISSOR_TEST)
 
+        if self._preview_scene is not None and self._preview_bufs:
+            scissored = self.space_scissor(gl)
+            preview_mvp = self._mvp(*self._preview_scene.origin, space=True)
+            self._program.bind()
+            self._program.setUniformValue(self._loc_mvp, preview_mvp)
+            for name, mode in (("triangles", GL_TRIANGLES),
+                               ("lines", GL_LINES),
+                               ("points", GL_POINTS)):
+                buf = self._preview_bufs.get(name)
+                if buf is None:
+                    continue
+                vao, _vbo, count = buf
+                vao.bind()
+                gl.glDrawArrays(mode, 0, count)
+                vao.release()
+            self._program.release()
+            self._draw_thick(gl, preview_mvp, None,
+                             self._preview_bufs.get("thick"),
+                             self._preview_scene.thick)
+            if scissored:
+                gl.glDisable(GL_SCISSOR_TEST)
+
         if self._ghost_scene is not None and self._ghost_bufs:
             # The ghost translates by shifting the vertex origin in the MVP:
             # same buffers every frame, only this uniform changes.
@@ -1153,6 +1192,22 @@ class Viewport(QOpenGLWidget):
         if self._overlay_scene.thick.vertex_count:
             self._overlay_bufs["thick"] = self._make_thick_vao(
                 self._overlay_scene.thick.data)
+
+    def _upload_preview(self) -> None:
+        for vao, vbo, _count in self._preview_bufs.values():
+            vbo.destroy()
+            vao.destroy()
+        self._preview_bufs.clear()
+        self._preview_dirty = False
+        if self._preview_scene is None:
+            return
+        for name in ("triangles", "lines", "points"):
+            batch: Batch = getattr(self._preview_scene, name)
+            if batch.vertex_count:
+                self._preview_bufs[name] = self._make_vao(batch.data)
+        if self._preview_scene.thick.vertex_count:
+            self._preview_bufs["thick"] = self._make_thick_vao(
+                self._preview_scene.thick.data)
 
     def _upload_ghost(self) -> None:
         for vao, vbo, _count in self._ghost_bufs.values():
@@ -1573,7 +1628,9 @@ class Viewport(QOpenGLWidget):
         p.setPen(pen)
         dim = delegate.preview_dimension()
         if dim is not None:
-            self._draw_dim_preview(p, dim, preview_color)
+            if self._preview_scene is None:
+                # no rendered preview (headless): the schematic stands in
+                self._draw_dim_preview(p, dim, preview_color)
             marker = getattr(delegate.tool, "align_marker", None)
             if marker is not None:
                 # AutoCAD's chained-dimension aid: the green square where

@@ -303,3 +303,49 @@ def test_file_new_forgets_the_overlay_of_the_previous_drawing(qapp) -> None:
         assert win.viewport._overlay_scene is None
     finally:
         win.close()
+
+
+def test_the_dimension_preview_is_the_dimension_the_click_leaves(qapp) -> None:
+    """Marco: while placing a linear dimension the preview showed the text
+    centred on the line, unlike the finished dimension (ISO-25: above).
+    The preview is now the rendered dimension itself, built from the same
+    command the click runs, and the document is untouched by it."""
+    import numpy as np
+
+    from core import actions
+    from render.backend import build_scene_for_entities
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        win.new_document()
+        win.maybe_save_changes = lambda *a, **k: True
+        t = win.tools
+        t._execute(actions.add_line((0, 0), (50, 0)))
+        doc = win.document.doc
+        revision = win.document.revision
+        win.dispatcher.submit("DIMLINEAR")
+        t.on_hover(0, 0, threshold_world=1.0)
+        t.on_click(0, 0)
+        t.on_hover(50, 0, threshold_world=1.0)
+        t.on_click(50, 0)
+        t.on_hover(25, 10, threshold_world=1.0)
+        preview = win.viewport._preview_scene
+        assert preview is not None and preview.lines.vertex_count > 0
+        assert preview.triangles.vertex_count > 0          # arrows and glyphs
+        # the document is as it was: no dimension, no *D block, no revision
+        # (the standard arrowhead block the renderer materialises stays, as
+        # it would after the first real dimension)
+        assert not doc.modelspace().query("DIMENSION")
+        assert not [b.name for b in doc.blocks if b.name.startswith("*D")]
+        assert win.document.revision == revision
+        # the click leaves exactly what was previewed
+        t.on_click(25, 10)
+        dim = doc.modelspace().query("DIMENSION")[0]
+        final = build_scene_for_entities(win.document, [dim], t._flatten,
+                                         t.canvas_space())
+        assert win.viewport._preview_scene is None              # tool ended
+        assert np.array_equal(preview.lines.data, final.lines.data)
+        assert preview.triangles.vertex_count == final.triangles.vertex_count
+    finally:
+        win.close()

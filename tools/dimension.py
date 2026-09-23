@@ -180,8 +180,18 @@ class _TwoPointDim(_DimTextMixin, Tool):
     def _measurement(self, cursor: Point) -> float:
         raise NotImplementedError
 
+    def preview_command(self, cursor: Point):
+        """The very command the click at ``cursor`` would run, so the
+        preview on screen is the dimension the click will leave: same
+        style, same text placement, same arrowheads. None before the two
+        origins are known."""
+        if self._p1 is None or self._p2 is None:
+            return None
+        return self._make(self._adjust_location(cursor))
+
     def preview_dimension(self, cursor: Point):
-        """A real-looking dimension preview (frame + measurement) or None."""
+        """A schematic preview (frame + measurement) or None -- what the
+        canvas draws when it cannot render preview_command (headless)."""
         if self._p1 is None or self._p2 is None:
             return None
         cursor = self._adjust_location(cursor)

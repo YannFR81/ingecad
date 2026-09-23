@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+- **The dimension being placed is previewed as the dimension it will be.**
+  While DIMLINEAR or DIMALIGNED waits for the line's location, the canvas
+  drew a schematic with the measurement centred on the line, unlike the
+  finished dimension (ISO-25 puts the text above). The preview is now the
+  rendered dimension itself, built from the very command the click runs,
+  taken back at once so the drawing is untouched.
+
 ### Fixed
 - **File > New showed the previous drawing's last dimensions** (their lines,
   without arrows or text) on the empty canvas: the entities queued for the
