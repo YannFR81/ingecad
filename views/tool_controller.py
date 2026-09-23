@@ -415,6 +415,11 @@ class ToolController(QObject):
             self._flatten_key = self._flatten_key_for(document)
             self._flatten_value = flatten
         self._base_handles = set()
+        # Entities queued for the overlay belong to the PREVIOUS drawing:
+        # left here, File > New drew the last dimensions' lines over the
+        # empty canvas (Marco, 2026-09-22), their blocks being unknown to
+        # the new document.
+        self._pending_render = []
         self.window.history.document = document
         self.window.history.clear()
         self._refresh_overlay()

@@ -277,3 +277,29 @@ def test_a_dimension_moved_to_a_layer_takes_that_layers_colour() -> None:
     assert _dim_colours(doc, dim) == {red}
     history.execute(actions.SetPropertyCommand([dim], "color", 3))
     assert _dim_colours(doc, dim) == {green}
+
+
+def test_file_new_forgets_the_overlay_of_the_previous_drawing(qapp) -> None:
+    """Marco: dimensions drawn on a plan, then File > New -- and their lines
+    showed on the empty canvas. The overlay queue (entities drawn since the
+    last full regen) survived attach_document and was rebuilt against the
+    new document, whose block table knows nothing of those dimensions."""
+    from core import actions
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        win.new_document()
+        win.maybe_save_changes = lambda *a, **k: True
+        t = win.tools
+        t._execute(actions.add_line((0, 0), (50, 0)))
+        t._execute(actions.dim_linear((0, 0), (50, 0), (25, 10)))
+        qapp.processEvents()
+        assert t._pending_render                     # queued for the overlay
+        assert win.viewport._overlay_scene is not None
+        win.new_document()
+        qapp.processEvents()
+        assert t._pending_render == []
+        assert win.viewport._overlay_scene is None
+    finally:
+        win.close()

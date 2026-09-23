@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Fixed
+- **File > New showed the previous drawing's last dimensions** (their lines,
+  without arrows or text) on the empty canvas: the entities queued for the
+  on-screen overlay since the last full regeneration survived the switch of
+  document and were drawn against the new one. The queue is now emptied with
+  everything else that belongs to the drawing being left.
 - **HATCH finds boundaries drawn with lines and arcs, islands included**
   (a user: "al dibujar el HATCH no detecta las islas"). Pick-internal-point
   only knew closed objects -- a closed polyline, a circle -- so a room
