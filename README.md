@@ -31,7 +31,7 @@ and IngePresupuestos (construction budgeting).
   trim/offset/extend, survey points with elevations, and printing to scale.
   Not a feature-for-feature AutoCAD clone.
 
-## Status — v0.6.2
+## Status — v0.6.3
 
 What works today:
 
@@ -78,7 +78,8 @@ What works today:
 - **Drawing with the real prompt trees**: lines, circles (2P/3P/TTR), the
   full 11-way ARC matrix, polylines with arcs and width, rectangles
   (chamfer/fillet/area/rotation), polygons, ellipses and elliptical arcs,
-  text with all 14 justifications, hatches; construction lines (XLINE/RAY),
+  text with all 14 justifications, hatches that find their boundary among
+  lines and arcs (islands included, like BPOLY); construction lines (XLINE/RAY),
   DIVIDE/MEASURE with aligned blocks, REVCLOUD.
 - **Dimensions, complete**: linear, aligned, angular, arc length, ordinate,
   radius and diameter to the norm (arrowheads inside the circle), center

@@ -82,6 +82,29 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.6.3" date="2026-09-22">
+      <description>
+        <p>What two testers found in 0.6.2: importing survey points died
+        before the options dialog opened (and a re-imported file came back
+        with east and north swapped); dimensions moved to a coloured layer
+        stayed white, on screen and on paper; a linear dimension picked
+        right-to-left drew mirrored; hatching found no boundary in what is
+        drawn with lines and arcs. Also: the dimension being placed is
+        previewed as the dimension it will be, File &gt; New no longer shows
+        the previous drawing's last dimensions, and the Topography plugin
+        has a user manual at ingecad.org/manual-topografia.</p>
+        <p xml:lang="es">Lo que dos probadores encontraron en la 0.6.2:
+        importar puntos topográficos moría antes de abrir el diálogo de
+        opciones (y un archivo reimportado volvía con Este y Norte
+        cambiados); las cotas movidas a una capa de color seguían blancas,
+        en pantalla y en papel; una cota lineal picada de derecha a
+        izquierda salía espejada; el sombreado no encontraba contorno en lo
+        dibujado con líneas y arcos. Además: la cota que se está colocando
+        se previsualiza como la cota que va a quedar, Archivo &gt; Nuevo ya
+        no muestra las últimas cotas del dibujo anterior, y el complemento
+        Topografía tiene manual en ingecad.org/manual-topografia.</p>
+      </description>
+    </release>
     <release version="0.6.2" date="2026-09-16">
       <description>
         <p>What a second tester found drawing to the norm: ISO linetypes

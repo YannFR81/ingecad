@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.6.3 — 2026-09-22
+
+What two testers found using 0.6.2 — a second video from Rafael and a
+surveyor in Bolivia on WhatsApp — plus what Marco found while checking the
+fixes. Two of the four user reports turned out to be bugs shipped in
+0.6.2 that touched everyone (importing points died; dimensions could not
+take a layer's colour), one was a missing feature (hatching what is drawn
+with lines), and one report is still open for lack of a reproducible case
+(object snap while drawing polylines). The Topography plugin now has a
+user manual at ingecad.org/manual-topografia.
 
 ### Changed
 - **The dimension being placed is previewed as the dimension it will be.**
