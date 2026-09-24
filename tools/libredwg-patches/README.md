@@ -3,7 +3,7 @@
 IngeCAD embeds LibreDWG's `dwg2dxf`/`dxf2dwg` as satellite converters
 (`vendor/libredwg/bin`, gitignored).
 
-## Current state — 2026-09-24: the 2026-08-13 stack + two EED fixes
+## Current state — 2026-09-24: the 2026-08-13 stack + two EED fixes + annotative context data
 
 Same base and seventeen patches as below, plus two fixes to `add_eed` in
 `src/in_dxf.c`, appended to `current/ingecad-vendor-0.14.8580.patch` and
@@ -23,6 +23,16 @@ opened upstream as PRs #1422 and #1423:
   including the DIMLFAC = 1/scale that makes a dimension drawn through a
   viewport read model units. Now looked up in the APPID table, 5.1.12 only
   as the fallback.
+
+- **Annotative scale representations reach the DXF** (#1424). `dwg2dxf`
+  decoded the TEXT/MTEXT/ALDIM/BLKREF/LEADER context-data objects but kept
+  them out of DXF as unstable classes, so every annotative object opened
+  at its default scale only. Promoted, with their DXF layout fixed to ODA's
+  (MTEXT 10/11 order, no own subclass markers, BLKREF scales 41-43, 2D
+  ALDIM text point): 5 275 TEXT, 755 MTEXT, 184 ALDIM, 402 BLKREF and 7
+  LEADER context objects in eight drawings identical to ODA tag by tag;
+  104 drawings with these classes convert with the same category and entity
+  count as before. `dxf2dwg` still does not import them — Save as DWG warns.
 
 Found while measuring annotative scaling (the flags were being erased).
 Verified: upstream `make check` 284/284 on each fix alone and on both; ODA

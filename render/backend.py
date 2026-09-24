@@ -595,6 +595,10 @@ def _rect_covers_model(rect, vp) -> bool:
 _DIMENSION_TYPES = frozenset(("DIMENSION", "ARC_DIMENSION"))
 
 
+#: not inside a layout pass (see TolerantFrontend._anno_scale)
+_UNSET = object()
+
+
 class TolerantFrontend(Frontend):
     """Frontend that survives malformed entities.
 
@@ -620,6 +624,35 @@ class TolerantFrontend(Frontend):
     #: Handles hidden by ISOLATEOBJECTS/HIDEOBJECTS. Display only: the
     #: entity stays in the document, it is simply not drawn.
     hidden_handles: frozenset = frozenset()
+
+    #: Annotation scale of the space being drawn (core.annotative): model
+    #: space's CANNOSCALE, a viewport's own scale, or None on the sheet
+    #: itself. _UNSET outside a layout pass (overlays): the entity's space
+    #: decides.
+    _anno_scale = _UNSET
+    #: ANNOALLVISIBLE of that space
+    _anno_show_all: bool = True
+    #: ANNOALLVISIBLE of the sheet whose viewports are being drawn
+    _anno_sheet_show_all: bool = True
+
+    def draw_layout(self, layout, *args, **kwargs):
+        """Draw a space at its annotation scale (see core.annotative)."""
+        from core import annotative
+
+        saved = (self._anno_scale, self._anno_show_all,
+                 self._anno_sheet_show_all)
+        if layout.is_modelspace:
+            self._anno_scale = annotative.current_scale(layout.doc)
+            self._anno_show_all = annotative.all_visible(layout)
+        else:
+            # objects drawn on the sheet itself show at their own size
+            self._anno_scale = None
+            self._anno_sheet_show_all = annotative.all_visible(layout)
+        try:
+            return super().draw_layout(layout, *args, **kwargs)
+        finally:
+            (self._anno_scale, self._anno_show_all,
+             self._anno_sheet_show_all) = saved
 
     def draw_viewport(self, vp) -> None:
         """Draw one viewport, skipping the model it does not show.
@@ -648,10 +681,20 @@ class TolerantFrontend(Frontend):
             # loss. A one-viewport sheet is exactly this case.
             rect = None
         self._vp_rect = rect
+        from core import annotative
+
+        saved = (self._anno_scale, self._anno_show_all)
+        # A viewport's annotation scale is its own property, NOT its zoom
+        # (they differ on 457 of 707 real viewports); without one it shows
+        # annotations at model space's scale.
+        self._anno_scale = (annotative.viewport_scale(vp)
+                            or annotative.current_scale(vp.doc))
+        self._anno_show_all = self._anno_sheet_show_all
         try:
             super().draw_viewport(vp)
         finally:
             self._vp_rect = previous
+            self._anno_scale, self._anno_show_all = saved
 
     def _outside_viewport(self, entity) -> bool:
         rect = self._vp_rect
@@ -705,8 +748,45 @@ class TolerantFrontend(Frontend):
             return
         self.draw_entities(children)
 
+    def _annotation_scale_for(self, entity):
+        scale = self._anno_scale
+        if scale is not _UNSET:
+            return scale
+        # an overlay pass: model space objects show at CANNOSCALE
+        from core import annotative
+
+        doc = entity.doc
+        try:
+            in_model = entity.dxf.owner == doc.modelspace().block_record_handle
+        except Exception:
+            return None
+        return annotative.current_scale(doc) if in_model else None
+
     def draw_entity(self, entity, properties) -> None:
-        if self._vp_rect is not None and self._outside_viewport(entity):
+        substituted = False
+        if entity.dxf.hasattr("handle"):
+            from core import annotative
+
+            scale = self._annotation_scale_for(entity)
+            if scale is not None:
+                rep = annotative.representation_for(
+                    entity, scale, self._anno_show_all)
+                if rep is annotative.HIDDEN:
+                    return
+                if rep is not None:
+                    try:
+                        virtual = annotative.virtual_representation(
+                            entity, rep)
+                    except Exception as exc:
+                        logger.warning("annotative #%s: %s",
+                                       entity.dxf.handle, exc)
+                        virtual = None
+                    if virtual is not None:
+                        entity, substituted = virtual, True
+        # a substituted representation lies elsewhere than the box cached
+        # for the object: never cull it
+        if (not substituted and self._vp_rect is not None
+                and self._outside_viewport(entity)):
             return
         if self.hidden_handles:
             handle = getattr(entity.dxf, "handle", None)

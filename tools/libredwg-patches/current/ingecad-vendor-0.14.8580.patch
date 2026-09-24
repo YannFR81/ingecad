@@ -1410,3 +1410,101 @@ index 1ef75a1c..cc1a329f 100644
          {
            dwg_add_handle (&eed[i].handle, 5, 0x12, NULL);
            LOG_TRACE ("handle: 5.1.12 [H] for APPID.%s\n", pair->value.s.ptr);
+
+--- a/src/classes.inc
++++ b/src/classes.inc
+@@ -302,11 +302,11 @@
+   UNSTABLE_CLASS_DXF (ACTION, BLOCKREPRESENTATION, ACDB_BLOCKREPRESENTATION_DATA)
+   UNSTABLE_CLASS     (ACTION, ASSOCDIMDEPENDENCYBODY)
+   UNSTABLE_CLASS     (ACTION, BLOCKPARAMDEPENDENCYBODY)
+-  UNSTABLE_CLASS_DXF (ACTION, ALDIMOBJECTCONTEXTDATA, ACDB_ALDIMOBJECTCONTEXTDATA_CLASS)
+-  UNSTABLE_CLASS_DXF (ACTION, MTEXTOBJECTCONTEXTDATA, ACDB_MTEXTOBJECTCONTEXTDATA_CLASS)
+-  UNSTABLE_CLASS_DXF (ACTION, BLKREFOBJECTCONTEXTDATA, ACDB_BLKREFOBJECTCONTEXTDATA_CLASS)
+-  UNSTABLE_CLASS_DXF (ACTION, LEADEROBJECTCONTEXTDATA, ACDB_LEADEROBJECTCONTEXTDATA_CLASS)
+-  UNSTABLE_CLASS_DXF (ACTION, TEXTOBJECTCONTEXTDATA,  ACDB_TEXTOBJECTCONTEXTDATA_CLASS)
++  STABLE_CLASS_DXF   (ACTION, ALDIMOBJECTCONTEXTDATA, ACDB_ALDIMOBJECTCONTEXTDATA_CLASS)
++  STABLE_CLASS_DXF   (ACTION, MTEXTOBJECTCONTEXTDATA, ACDB_MTEXTOBJECTCONTEXTDATA_CLASS)
++  STABLE_CLASS_DXF   (ACTION, BLKREFOBJECTCONTEXTDATA, ACDB_BLKREFOBJECTCONTEXTDATA_CLASS)
++  STABLE_CLASS_DXF   (ACTION, LEADEROBJECTCONTEXTDATA, ACDB_LEADEROBJECTCONTEXTDATA_CLASS)
++  STABLE_CLASS_DXF   (ACTION, TEXTOBJECTCONTEXTDATA,  ACDB_TEXTOBJECTCONTEXTDATA_CLASS)
+   UNSTABLE_CLASS_DXF (ACTION, FCFOBJECTCONTEXTDATA, ACDB_FCFOBJECTCONTEXTDATA_CLASS)
+ 
+   UNSTABLE_CLASS_DXF (ACTION, ASSOCVARIABLE, ACDBASSOCVARIABLE)
+--- a/src/dwg2.spec
++++ b/src/dwg2.spec
+@@ -3620,7 +3620,6 @@
+   FIELD_HANDLE (scale, 2, 340)
+ 
+ #define AcDbTextObjectContextData_fields                                \
+-  SUBCLASS (AcDbTextObjectContextData);                                 \
+   FIELD_BS (horizontal_mode, 70);                                       \
+   FIELD_BD (rotation, 50);                                              \
+   FIELD_2RD (ins_pt, 10);                                               \
+@@ -3633,7 +3632,6 @@
+   DXF { FIELD_HANDLE (dimension.block, 5, 2); }         \
+   DXF { FIELD_B (dimension.b293, 293); }                \
+   FIELD_2RD (dimension.def_pt, 10); /* text location */ \
+-  DXF { VALUE_RD (0.0, 30); }                           \
+   FIELD_B (dimension.is_def_textloc, 294); /* 1 */      \
+   FIELD_BD (dimension.text_rotation, 140);              \
+   FIELD_HANDLE (dimension.block, 5, 0);                 \
+@@ -4562,13 +4560,9 @@
+ DWG_OBJECT (MTEXTOBJECTCONTEXTDATA)
+   AcDbAnnotScaleObjectContextData_fields;
+   FIELD_BL (attachment, 70);
+-  DXF {
+-    FIELD_3BD (ins_pt, 10);
+-    FIELD_3BD (x_axis_dir, 11);
+-  } else {
+-    FIELD_3BD (x_axis_dir, 0);
+-    FIELD_3BD (ins_pt, 0); /* ODA bug */
+-  }
++  // DWG and DXF alike: the direction first, then the insertion point
++  FIELD_3BD (x_axis_dir, 10);
++  FIELD_3BD (ins_pt, 11);
+   FIELD_BD (rect_width, 40);
+   FIELD_BD (rect_height, 41);
+   FIELD_BD (extents_width, 42);
+@@ -4601,17 +4595,16 @@
+ DWG_OBJECT (BLKREFOBJECTCONTEXTDATA)
+   HANDLE_UNKNOWN_BITS;
+   AcDbAnnotScaleObjectContextData_fields;
+-  SUBCLASS (AcDbBlkrefObjectContextData);
+   FIELD_BD (rotation, 50);
+   FIELD_3BD (ins_pt, 10);
+-  FIELD_3BD_1 (scale_factor, 42);
++  FIELD_3BD_1 (scale_factor, 41);
+   START_OBJECT_HANDLE_STREAM;
+ DWG_OBJECT_END
+ 
+ DWG_OBJECT (LEADEROBJECTCONTEXTDATA)
+   HANDLE_UNKNOWN_BITS;
+   AcDbAnnotScaleObjectContextData_fields;
+-  SUBCLASS (AcDbLeaderObjectContextData);
++  // no subclass marker of its own in DXF
+   FIELD_BL (num_points, 70); /* 3 */
+   FIELD_3DPOINT_VECTOR (points, num_points, 10);
+   FIELD_3DPOINT (x_direction, 11);
+--- a/src/dynapi.c
++++ b/src/dynapi.c
+@@ -5896,7 +5896,7 @@
+   { "ins_pt",	"3BD", sizeof (BITCODE_3BD),  OFF (struct _dwg_object_BLKREFOBJECTCONTEXTDATA, ins_pt),
+     1,0,0, 10 },
+   { "scale_factor",	"3BD_1", sizeof (BITCODE_3BD),  OFF (struct _dwg_object_BLKREFOBJECTCONTEXTDATA, scale_factor),
+-    1,0,0, 42 },
++    1,0,0, 41 },
+   {NULL,	NULL,	0,	0,	0,0,0, 0},
+ };
+ /* from typedef struct _dwg_object_BLOCKALIGNEDCONSTRAINTPARAMETER: (sorted by offset) */
+@@ -8948,9 +8948,9 @@
+   { "attachment",	"BL", sizeof (BITCODE_BL),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, attachment),
+     0,0,0, 70 },
+   { "ins_pt",	"3BD", sizeof (BITCODE_3BD),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, ins_pt),
+-    1,0,0, 10 },
+-  { "x_axis_dir",	"3BD", sizeof (BITCODE_3BD),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, x_axis_dir),
+     1,0,0, 11 },
++  { "x_axis_dir",	"3BD", sizeof (BITCODE_3BD),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, x_axis_dir),
++    1,0,0, 10 },
+   { "rect_height",	"BD", sizeof (BITCODE_BD),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, rect_height),
+     0,0,0, 41 },
+   { "rect_width",	"BD", sizeof (BITCODE_BD),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, rect_width),

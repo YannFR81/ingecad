@@ -1418,5 +1418,6 @@
   "OTRACK": "RASTREO",
   "DYN": "DIN",
   "Object snap tracking": "Rastreo de referencia a objetos",
-  "Dynamic input": "Entrada dinámica"
+  "Dynamic input": "Entrada dinámica",
+  "{count} annotative objects keep only their default scale in the DWG; save as DXF to keep every scale": "{count} objetos anotativos conservan en el DWG solo su escala por defecto; guarde como DXF para conservar todas las escalas"
 }

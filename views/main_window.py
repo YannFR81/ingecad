@@ -3149,8 +3149,31 @@ class MainWindow(QMainWindow):
                 return None
         except Exception:
             return None
+        # The live model is tessellated once, at model space's annotation
+        # scale: a viewport showing annotations at another scale needs its
+        # own representations, which only the baked path draws.
+        if self._model_annotative():
+            from core import annotative
+
+            doc = self.document.doc
+            shown = annotative.viewport_scale(vp)
+            if shown is not None and shown != annotative.current_scale(doc):
+                return None
         # past those, the placement IS the projection MSPACE edits through
         return layout_ops.viewport_placement(vp)
+
+    def _model_annotative(self) -> bool:
+        """Does model space hold any annotative object? Cached per revision:
+        the live path asks on every gesture."""
+        from core import annotative
+
+        key = (id(self.document), self.document.revision)
+        cached = getattr(self, "_annotative_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (key, annotative.has_annotative(
+                self.document.doc.modelspace()))
+            self._annotative_cache = cached
+        return cached[1]
 
     def _vp_live_draw(self) -> bool:
         """Show EVERY viewport's content live, at its current view.

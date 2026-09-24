@@ -184,9 +184,27 @@ class Document:
                 tmp_dxf = Path(tmp) / "out.dxf"
                 write_dwg_intermediate(self.doc, tmp_dxf)
                 warnings = write_dwg(tmp_dxf, path, version)
+            warnings += _annotative_save_warnings(self.doc)
         else:
             self.doc.saveas(path)
             engine = "dxf"
         self.path = path
         self.dirty = False
         return engine, warnings
+
+
+def _annotative_save_warnings(doc) -> list[str]:
+    """No DWG writer IngeCAD ships keeps an object's scale representations
+    yet (LibreDWG's DXF importer drops them), so a save that loses them says
+    so -- and DXF, which keeps them all, is the way out."""
+    from core import annotative
+    from core.i18n import tr
+
+    count = sum(1 for layout in doc.layouts for e in layout
+                if annotative.is_annotative(e)
+                and len(annotative.representations(e)) > 1)
+    if not count:
+        return []
+    return [tr("{count} annotative objects keep only their default scale "
+               "in the DWG; save as DXF to keep every scale",
+               count=count)]
