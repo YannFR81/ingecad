@@ -3,7 +3,34 @@
 IngeCAD embeds LibreDWG's `dwg2dxf`/`dxf2dwg` as satellite converters
 (`vendor/libredwg/bin`, gitignored).
 
-## Current state — 2026-08-13: base 0.14.8580 + seventeen patches, taken FROM THE PRs
+## Current state — 2026-09-24: the 2026-08-13 stack + two EED fixes
+
+Same base and seventeen patches as below, plus two fixes to `add_eed` in
+`src/in_dxf.c`, appended to `current/ingecad-vendor-0.14.8580.patch` and
+opened upstream as PRs #1422 and #1423:
+
+- **Several applications' XDATA fused into one** (#1422). The slot a
+  `1001` fills with its APPID handle was wiped by a `memset` when the
+  group's first value reused it (every group but the first), and the search
+  for the group's header walked down without stopping, so it always found
+  the first group. On 42 real drawings: 851 objects with two or more EED
+  groups, **0 intact before, 851 after**; single-group objects unchanged.
+  What it was erasing on every Save as DWG: `AcadAnnotative` flags,
+  Topografía's `INGECAD` point data, any other application's data.
+- **`ACAD` hard-coded at 5.1.12** (#1423). ezdxf creates it at 2A, so
+  in every drawing started in IngeCAD the EED pointed at the wrong object;
+  ODA/AutoCAD audited it away and a dimension lost its DSTYLE overrides —
+  including the DIMLFAC = 1/scale that makes a dimension drawn through a
+  viewport read model units. Now looked up in the APPID table, 5.1.12 only
+  as the fallback.
+
+Found while measuring annotative scaling (the flags were being erased).
+Verified: upstream `make check` 284/284 on each fix alone and on both; ODA
+reads the written DWG like the source DXF; `tests/test_xdata_roundtrip.py`
+fails on the previous vendor and passes on this one; 340 DWG-related
+IngeCAD tests green; `main.py --check` OK.
+
+## Previous state — 2026-08-13: base 0.14.8580 + seventeen patches, taken FROM THE PRs
 
 Re-vendorized onto release **0.14.8580** (`current/ingecad-vendor-0.14.8580.patch`,
 built by `build-vendor.sh`). The seventeen are exactly the seventeen pull requests
