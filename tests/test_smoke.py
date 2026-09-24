@@ -149,6 +149,27 @@ def test_toolbar_buttons_start_commands(qapp):
     win.close()
 
 
+def test_no_command_sits_on_two_main_toolbars(qapp):
+    # Match Properties used to be on both Standard and Modify (Rafael,
+    # review 4). AutoCAD keeps it on Standard only; one button per command.
+    import re
+
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    seen: dict[str, str] = {}
+    for bar in (win._standard_toolbar, win._draw_toolbar, win._modify_toolbar):
+        for act in bar.actions():
+            m = re.search(r"\(([A-Z_-]+)\)$", act.toolTip())
+            if not m:
+                continue
+            name = m.group(1)
+            assert name not in seen, f"{name} on {seen.get(name)} and {bar.objectName()}"
+            seen[name] = bar.objectName()
+    assert seen.get("MATCHPROP") == "standard_toolbar"
+    win.close()
+
+
 def test_trim_full_flow_through_controller(qapp):
     # Regression: wants_selection was silently reset by the dataclass
     # __init__, so TRIM never entered its selection phase and Enter killed

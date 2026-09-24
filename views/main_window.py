@@ -2041,8 +2041,7 @@ class MainWindow(QMainWindow):
                   ("STRETCH", tr("Stretch")), ("TRIM", tr("Trim")),
                   ("EXTEND", tr("Extend")), ("BREAK", tr("Break")),
                   ("JOIN", tr("Join")), ("CHAMFER", tr("Chamfer")),
-                  ("FILLET", tr("Fillet")), ("MATCHPROP", tr("Match Properties")),
-                  ("EXPLODE", tr("Explode"))]
+                  ("FILLET", tr("Fillet")), ("EXPLODE", tr("Explode"))]
 
         self._draw_toolbar = QToolBar(tr("Draw"), self)
         self._draw_toolbar.setObjectName("draw_toolbar")
