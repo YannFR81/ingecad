@@ -63,9 +63,7 @@ What works today:
   (patterns + solids), linetypes, dimensions, OCS, paperspace layouts —
   smooth pan/zoom even on cadastre-scale drawings (90k+ entities).
 - **DWG in and out**: open `.dwg` transparently via GNU LibreDWG; save as
-  DWG r2000 (LibreDWG) or r2018 (Open CAD Studio or the ODA File Converter,
-  if installed), with a silent verified-save check. Open CAD Studio also
-  stands in as reader and writer wherever LibreDWG is missing (Windows).
+  DWG r2000 (LibreDWG, bundled), with a silent verified-save check.
 - **Classic interface**: command line at the bottom with AutoCAD aliases
   (`L`, `C`, `M`, `TR`, `Z`+`E` …), dark model space, dockable Layers /
   Properties / Styles panels.
@@ -237,19 +235,11 @@ IngeCAD ships:
 tools/libredwg-patches/build-vendor.sh    # downloads, patches, builds into vendor/
 ```
 
-That build is not stock: it is LibreDWG 0.14.8556 plus thirteen fixes, all of
-them open as pull requests upstream, without which several real-world drawings
-do not open at all. See `tools/libredwg-patches/README.md`. DXF works out of the
-box either way.
-
-A second satellite, [Open CAD Studio](https://github.com/acadrust/opencadstudio)
-(MIT, Rust), is picked up automatically when installed — an AppImage under
-`~/Aplicaciones` or `~/Applications`, the Windows installer in
-`Program Files\Open CAD Studio`, anything on `PATH`, or the path in the
-`INGECAD_OPENCADSTUDIO` environment variable. It adds **DWG r2018 export**
-("Save as ▸ DWG 2018 — Open CAD Studio") and, on a machine without LibreDWG,
-reads and writes DWG on its own. The freeware ODA File Converter remains the
-third option for r2018 export. `ingecad --check` lists which converters were
+That build is not stock: it is a LibreDWG release plus our own fixes, sent
+upstream as pull requests, without which many real-world drawings do not open
+or do not save. See `tools/libredwg-patches/README.md`. DXF works out of the
+box either way. LibreDWG is IngeCAD's only DWG engine: what it cannot do yet
+we fix in LibreDWG itself. `ingecad --check` shows where the converters were
 found.
 
 ## Building the AppImage yourself

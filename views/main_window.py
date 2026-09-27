@@ -4082,18 +4082,11 @@ class MainWindow(QMainWindow):
         path = Path(filename)
         if path.suffix.lower() not in (".dwg", ".dxf"):
             path = path.with_suffix(".dwg" if "dwg" in selected.lower() else ".dxf")
-        version = "r2018" if "2018" in (selected or "") else "r2000"
-        return self._write_document(path, version)
+        return self._write_document(path, "r2000")
 
     def _save_filters(self) -> str:
-        """DWG r2000 always (LibreDWG, bundled); DWG 2018 when Open CAD
-        Studio is installed (its native writer); DXF, always exact."""
-        from formats.dwg_bridge import find_opencadstudio
-        filters = [tr("DWG (*.dwg)")]
-        if find_opencadstudio() is not None:
-            filters.append(tr("DWG 2018 — Open CAD Studio (*.dwg)"))
-        filters.append(tr("DXF (*.dxf)"))
-        return ";;".join(filters)
+        """DWG r2000 (LibreDWG, bundled); DXF, always exact."""
+        return ";;".join([tr("DWG (*.dwg)"), tr("DXF (*.dxf)")])
 
     def save_document(self) -> bool:
         """SAVE / QSAVE / Ctrl+S — write over the file that is open.
@@ -4340,9 +4333,6 @@ class MainWindow(QMainWindow):
             # layout settings are simplified on the way out (older container).
             self.command_line.echo(
                 tr("Saved {name} (DWG r2000)", name=path.name))
-        elif engine == "opencadstudio":
-            self.command_line.echo(
-                tr("Saved {name} (DWG 2018 via Open CAD Studio)", name=path.name))
         else:
             self.command_line.echo(tr("Saved {name}", name=path.name))
         # Verified save: the file is written either way, but if the DWG did not
@@ -4380,8 +4370,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(
                     self,
                     tr("Open Drawing"),
-                    tr("DWG support needs a converter — LibreDWG (dwg2dxf) "
-                       "or Open CAD Studio — and neither was found."),
+                    tr("DWG support needs LibreDWG's converter (dwg2dxf), "
+                       "and it was not found."),
                 )
                 return
         if self._open_thread is not None:

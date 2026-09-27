@@ -164,12 +164,10 @@ class Document:
         return self.active_layout or "Model"
 
     def save_as(self, path: Path, version: str = "r2000") -> str:
-        """Save as DXF directly, or as DWG via a satellite: LibreDWG for
-        r2000 (bundled), Open CAD Studio for r2018 (native writer) — see
-        ``formats.dwg_bridge.dwg_write_engine``.
+        """Save as DXF directly, or as DWG r2000 through LibreDWG (bundled)
+        — see ``formats.dwg_bridge.dwg_write_engine``.
 
-        Returns ``(engine, warnings)``: engine is "dxf", "libredwg" or
-        "opencadstudio";
+        Returns ``(engine, warnings)``: engine is "dxf" or "libredwg";
         warnings is a list of human-readable strings from the verified save
         (empty when the DWG checked out clean). DXF saves never warn.
         """
