@@ -212,6 +212,9 @@ class CircleTool(Tool):
     # AutoCAD's CIRCLERAD: the last radius used, session-only. None = no
     # default shown in the prompt.
     last_radius = None
+    #: Set by Draw > Circle > Center, Diameter: after the centre, ask the
+    #: diameter instead of the radius.
+    diameter_after_center = False
 
     def start(self) -> None:
         self.name = "CIRCLE"
@@ -250,6 +253,13 @@ class CircleTool(Tool):
             if t in ("T", "TTR"):
                 self._mode = "TTR"
                 self.entity_picker = True   # raw picks: tangency is deferred
+                self.prompt("Specify point on object for first tangent of circle:")
+                return True
+            if t == "TTT":
+                # Draw > Circle > Tan, Tan, Tan (AutoCAD runs 3P with a
+                # tangent snap on each point): three tangent objects.
+                self._mode = "TTT"
+                self.entity_picker = True
                 self.prompt("Specify point on object for first tangent of circle:")
                 return True
         if self._mode == "CR" and self._pts:
@@ -320,6 +330,24 @@ class CircleTool(Tool):
         self._make(center, radius)
 
     def on_point(self, point: Point) -> None:
+        if self._mode == "TTT":
+            obj = self._pick_tangent_object(point)
+            if obj is None:
+                return
+            self._tangents.append((obj, point))
+            if len(self._tangents) == 1:
+                self.prompt("Specify point on object for second tangent of circle:")
+            elif len(self._tangents) == 2:
+                self.prompt("Specify point on object for third tangent of circle:")
+            else:
+                try:
+                    center, radius = actions.ttt_circle(self._tangents)
+                except ValueError:
+                    self.ctx.echo(tr("Circle does not exist."))
+                    self.ctx.finish()
+                    return
+                self._make(center, radius)
+            return
         if self._mode == "TTR":
             obj = self._pick_tangent_object(point)
             if obj is None:
@@ -337,7 +365,15 @@ class CircleTool(Tool):
         self._pts.append(point)
         self.last_point = point
         if self._mode == "CR":
-            if len(self._pts) == 1:
+            if len(self._pts) == 1 and self.diameter_after_center:
+                # Draw > Circle > Center, Diameter
+                self._mode = "CD"
+                r = type(self).last_radius
+                if r is not None:
+                    self.prompt("Specify diameter of circle <{d:g}>:", d=2 * r)
+                else:
+                    self.prompt("Specify diameter of circle:")
+            elif len(self._pts) == 1:
                 self._radius_prompt()
             else:
                 self._make(self._pts[0], math.dist(self._pts[0], self._pts[1]))

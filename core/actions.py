@@ -517,6 +517,93 @@ def tangent_circle(obj1, pick1, obj2, pick2, radius: float):
     return best
 
 
+def ttt_circle(tangents):
+    """CIRCLE Tan, Tan, Tan: ``(center, radius)`` of the circle tangent to
+    three objects -- lines or circles, in ``_tangent_loci``'s form -- each
+    given with the point where it was picked.
+
+    Every way of touching is tried (each side of a line; outside, inside or
+    around a circle), each solved by Newton from the circle through the
+    picks. Of the circles found, the one whose tangent points are nearest
+    the picks wins -- TTR's rule. Raises ValueError when there is none.
+    """
+    import itertools
+
+    objs = [obj for obj, _pick in tangents]
+    picks = [pick for _obj, pick in tangents]
+    scale = max(1.0, *(abs(v) for p in picks for v in p))
+
+    def variants(obj):
+        return (1.0, -1.0) if obj[0] == "line" else ("out", "in", "around")
+
+    def residual(obj, how, cx, cy, r):
+        """(value, d/dcx, d/dcy, d/dr) of one tangency condition."""
+        if obj[0] == "line":
+            (px, py), (qx, qy) = obj[1], obj[2]
+            length = math.hypot(qx - px, qy - py)
+            nx, ny = -(qy - py) / length, (qx - px) / length
+            return (how * (nx * (cx - px) + ny * (cy - py)) - r,
+                    how * nx, how * ny, -1.0)
+        (ox, oy), big_r = obj[1], obj[2]
+        d = math.hypot(cx - ox, cy - oy) or 1e-12
+        gx, gy = (cx - ox) / d, (cy - oy) / d
+        if how == "out":
+            return d - big_r - r, gx, gy, -1.0
+        if how == "in":
+            return d - big_r + r, gx, gy, 1.0
+        return d - r + big_r, gx, gy, -1.0            # around it
+
+    def tangent_point(obj, how, center):
+        point = _tangent_point(obj, center)
+        if obj[0] == "circle" and how == "around":
+            (ox, oy) = obj[1]
+            point = (2 * ox - point[0], 2 * oy - point[1])
+        return point
+
+    starts = []
+    try:
+        starts.append(circle_from_3p(*picks))
+    except ValueError:
+        pass
+    mx = sum(p[0] for p in picks) / 3.0
+    my = sum(p[1] for p in picks) / 3.0
+    starts.append(((mx, my),
+                   max(1e-6, sum(math.dist((mx, my), p) for p in picks) / 3.0)))
+
+    best, best_score = None, None
+    for hows in itertools.product(*(variants(o) for o in objs)):
+        for (cx, cy), r in starts:
+            for _ in range(60):
+                rows = [residual(o, h, cx, cy, r) for o, h in zip(objs, hows)]
+                f = [row[0] for row in rows]
+                if max(abs(v) for v in f) < 1e-12 * scale:
+                    break
+                (a, b, c), (d_, e, g), (h_, i, j) = (row[1:] for row in rows)
+                det = (a * (e * j - g * i) - b * (d_ * j - g * h_)
+                       + c * (d_ * i - e * h_))
+                if abs(det) < 1e-18:
+                    break
+                # Cramer on J * step = -f
+                f0, f1, f2 = (-v for v in f)
+                sx = (f0 * (e * j - g * i) - b * (f1 * j - g * f2)
+                      + c * (f1 * i - e * f2)) / det
+                sy = (a * (f1 * j - g * f2) - f0 * (d_ * j - g * h_)
+                      + c * (d_ * f2 - f1 * h_)) / det
+                sr = (a * (e * f2 - f1 * i) - b * (d_ * f2 - f1 * h_)
+                      + f0 * (d_ * i - e * h_)) / det
+                cx, cy, r = cx + sx, cy + sy, r + sr
+            rows = [residual(o, h, cx, cy, r) for o, h in zip(objs, hows)]
+            if r <= 1e-9 or max(abs(row[0]) for row in rows) > 1e-9 * scale:
+                continue
+            score = sum(math.dist(tangent_point(o, h, (cx, cy)), p)
+                        for o, h, p in zip(objs, hows, picks))
+            if best_score is None or score < best_score:
+                best, best_score = ((cx, cy), r), score
+    if best is None:
+        raise ValueError("circle does not exist")
+    return best
+
+
 def add_polyline(points, closed: bool = False) -> AddEntityCommand:
     """LWPOLYLINE from plain (x, y) pairs or full (x, y, start_width,
     end_width, bulge) vertices (PLINE arc segments and tapered widths)."""

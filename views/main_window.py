@@ -344,6 +344,16 @@ class MainWindow(QMainWindow):
         self.viewport.setFocus()
 
     # -- canvas right-click (classic AutoCAD shortcut menu) ---------------------
+    def _circle_by(self, option: str) -> None:
+        """Draw > Circle > ...: CIRCLE, answered with the option picked.
+        Center, Diameter answers at the radius prompt, like AutoCAD's macro."""
+        self._invoke_command("CIRCLE")
+        tool = self.tools.tool
+        if option == "D" and tool is not None:
+            tool.diameter_after_center = True
+        elif option:
+            self.tools.on_text(option)
+
     def show_osnap_menu(self, global_pos) -> None:
         """Shift + right-click during a command: the object snap menu. The
         snap picked is for the next point only (a one-shot override)."""
@@ -1121,9 +1131,18 @@ class MainWindow(QMainWindow):
         cmd_item(draw_menu, tr("Construction Line"), "XLINE")
         cmd_item(draw_menu, tr("Ray"), "RAY")
         draw_menu.addSeparator()
-        for label, name in ((tr("Line"), "LINE"), (tr("Polyline"), "PLINE"),
-                            (tr("Circle"), "CIRCLE"), (tr("Arc"), "ARC"),
-                            (tr("Ellipse"), "ELLIPSE"),
+        for label, name in ((tr("Line"), "LINE"), (tr("Polyline"), "PLINE")):
+            cmd_item(draw_menu, label, name)
+        # AutoCAD classic: Draw > Circle, one entry per way of drawing it
+        circle_menu = draw_menu.addMenu(tr("Circle"))
+        for label, option in ((tr("Center, Radius"), ""),
+                              (tr("Center, Diameter"), "D"),
+                              (tr("2 Points"), "2P"), (tr("3 Points"), "3P"),
+                              (tr("Tan, Tan, Radius"), "T"),
+                              (tr("Tan, Tan, Tan"), "TTT")):
+            item(circle_menu, label,
+                 lambda _=False, o=option: self._circle_by(o))
+        for label, name in ((tr("Arc"), "ARC"), (tr("Ellipse"), "ELLIPSE"),
                             (tr("Rectangle"), "RECTANG"), (tr("Polygon"), "POLYGON"),
                             (tr("Point"), "POINT")):
             cmd_item(draw_menu, label, name)

@@ -178,3 +178,82 @@ def test_deferred_tangent_then_a_point(qapp):
         tools.cancel()
         win.document.dirty = False
         win.close()
+
+
+def test_circle_tan_tan_tan_from_the_draw_menu(qapp):
+    """#13: Draw > Circle > Tan, Tan, Tan -- here the incircle of a
+    30-40-50 triangle, picked on its three sides."""
+    import pytest
+
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    msp = win.document.modelspace()
+    for a, b in (((0, 0), (30, 0)), ((30, 0), (0, 40)), ((0, 40), (0, 0))):
+        msp.add_line(a, b)
+    win.tools._invalidate_geometry()
+    tools = win.tools
+    try:
+        bar_actions = win._menu_bar.actions()
+        draw = next(a for a in bar_actions
+                    if a.text().replace("&", "") == "Draw").menu()
+        draw_actions = draw.actions()
+        circle = next(a for a in draw_actions
+                      if a.text().replace("&", "") == "Circle").menu()
+        circle_actions = circle.actions()
+        next(a for a in circle_actions if a.text() == "Tan, Tan, Tan").trigger()
+        for pick in ((12, 0), (15, 20), (0, 12)):
+            tools.on_click(*pick)
+        made = [e for e in msp if e.dxftype() == "CIRCLE"]
+        assert len(made) == 1
+        c = made[0]
+        assert (c.dxf.center.x, c.dxf.center.y) == pytest.approx((10, 10))
+        assert c.dxf.radius == pytest.approx(10)
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()
+
+
+def test_three_circles_inside_or_around_by_the_picks():
+    import pytest
+
+    from core import actions
+
+    c1, c2, c3 = (("circle", (0, 0), 5), ("circle", (30, 0), 5),
+                  ("circle", (15, 25), 5))
+    center, r = actions.ttt_circle([(c1, (4, 3)), (c2, (26, 3)),
+                                    (c3, (15, 20))])
+    assert center == pytest.approx((15, 8)) and r == pytest.approx(12)
+    center, r = actions.ttt_circle([(c1, (-4, -3)), (c2, (34, -3)),
+                                    (c3, (15, 30))])
+    assert center == pytest.approx((15, 8)) and r == pytest.approx(22)
+
+
+def test_circle_center_diameter_from_the_draw_menu(qapp):
+    import pytest
+
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    tools = win.tools
+    try:
+        bar_actions = win._menu_bar.actions()
+        draw = next(a for a in bar_actions
+                    if a.text().replace("&", "") == "Draw").menu()
+        draw_actions = draw.actions()
+        circle = next(a for a in draw_actions
+                      if a.text().replace("&", "") == "Circle").menu()
+        circle_actions = circle.actions()
+        next(a for a in circle_actions
+             if a.text() == "Center, Diameter").trigger()
+        win._on_command_submitted("50,50")
+        win._on_command_submitted("20")               # a DIAMETER
+        made = [e for e in win.document.modelspace() if e.dxftype() == "CIRCLE"]
+        assert len(made) == 1 and made[0].dxf.radius == pytest.approx(10)
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()
