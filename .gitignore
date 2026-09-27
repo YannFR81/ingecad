@@ -35,3 +35,7 @@ crash_report.txt
 packaging/flatpak/.staging/
 packaging/flatpak/.flatpak-builder/
 .wrangler/
+
+# Private working notes for Claude Code: kept on the maintainer's machine only
+CLAUDE.md
+docs/bitacora.md
