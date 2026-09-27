@@ -392,6 +392,86 @@ def test_fillet_parallel_lines_joins_them_with_a_semicircle(radius):
     assert not list(h.msp.query("ARC"))
 
 
+def _run_fillet(h, radius, pick1, pick2):
+    tool = FilletTool(h.ctx)
+    FilletTool.radius = radius
+    tool.start()
+    tool.on_point(pick1)
+    tool.on_point(pick2)
+
+
+def _ends(e):
+    if e.dxftype() == "LINE":
+        return [(e.dxf.start.x, e.dxf.start.y), (e.dxf.end.x, e.dxf.end.y)]
+    return [tuple(e.start_point)[:2], tuple(e.end_point)[:2]]
+
+
+def _meets(a, b):
+    return any(math.dist(p, q) < 1e-9 for p in _ends(a) for q in _ends(b))
+
+
+def test_fillet_line_and_arc_is_tangent_to_both_and_trims_them():
+    """#16: radius 5 between a line and an arc -- Rafael's everyday case."""
+    h = Harness()
+    h.msp.add_line((0, 0), (30, 0))
+    h.msp.add_arc((50, 20), 15, 180, 300)
+    _run_fillet(h, 5.0, (25, 0), (50 + 15 * math.cos(math.radians(240)),
+                                  20 + 15 * math.sin(math.radians(240))))
+    lines = list(h.msp.query("LINE"))
+    arcs = sorted(h.msp.query("ARC"), key=lambda a: a.dxf.radius)
+    assert len(lines) == 1 and len(arcs) == 2
+    fillet, trimmed = arcs
+    c = fillet.dxf.center
+    assert fillet.dxf.radius == pytest.approx(5)
+    assert c.y == pytest.approx(5)                           # tangent to y=0
+    assert math.dist((c.x, c.y), (50, 20)) == pytest.approx(20)  # outside R15
+    assert _meets(fillet, lines[0]) and _meets(fillet, trimmed)
+    assert (0.0, 0.0) in [tuple(map(float, p)) for p in _ends(lines[0])]
+    h.history.undo()
+    assert len(list(h.msp.query("ARC"))) == 1
+    assert list(h.msp.query("LINE"))[0].dxf.end.x == pytest.approx(30)
+
+
+def test_fillet_two_arcs():
+    h = Harness()
+    h.msp.add_arc((0, 0), 10, 0, 180)
+    h.msp.add_arc((30, 0), 10, 0, 180)
+    _run_fillet(h, 6.0, (10 * math.cos(math.radians(20)),
+                         10 * math.sin(math.radians(20))),
+                (30 + 10 * math.cos(math.radians(160)),
+                 10 * math.sin(math.radians(160))))
+    arcs = list(h.msp.query("ARC"))
+    fillet = next(a for a in arcs if a.dxf.radius == pytest.approx(6))
+    others = [a for a in arcs if a is not fillet]
+    c = fillet.dxf.center
+    assert math.dist((c.x, c.y), (0, 0)) == pytest.approx(16)
+    assert math.dist((c.x, c.y), (30, 0)) == pytest.approx(16)
+    assert len(others) == 2 and all(_meets(fillet, o) for o in others)
+
+
+def test_fillet_leaves_a_circle_whole():
+    h = Harness()
+    circle = h.msp.add_circle((50, 20), 15)
+    h.msp.add_line((0, 0), (30, 0))
+    _run_fillet(h, 5.0, (35, 20), (25, 0))
+    assert circle.is_alive and circle.dxf.radius == 15
+    fillet = next(a for a in h.msp.query("ARC"))
+    line = next(iter(h.msp.query("LINE")))
+    assert _meets(fillet, line)
+
+
+def test_fillet_radius_zero_line_and_arc_meet_at_the_corner():
+    h = Harness()
+    h.msp.add_line((0, 0), (40, 0))
+    h.msp.add_arc((50, 10), 15, 200, 300)        # crosses y = 0
+    _run_fillet(h, 0.0, (5, 0), (50 + 15 * math.cos(math.radians(280)),
+                                 10 + 15 * math.sin(math.radians(280))))
+    line = next(iter(h.msp.query("LINE")))
+    arc = next(iter(h.msp.query("ARC")))
+    assert len(list(h.msp.query("ARC"))) == 1           # no fillet arc
+    assert _meets(line, arc)
+
+
 def test_extend_ignores_phantom_arc_circle():
     # User repro: a trimmed circle (now an ARC) must NOT act as its full
     # phantom circle — EXTEND has to reach the real edge beyond it.

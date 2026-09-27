@@ -493,6 +493,15 @@ def ttr_center(obj1, pick1, obj2, pick2, radius: float):
     of that radius fits ("Circle does not exist.")."""
     if radius <= 0.0:
         raise ValueError("radius must be positive")
+    return tangent_circle(obj1, pick1, obj2, pick2, radius)[0]
+
+
+def tangent_circle(obj1, pick1, obj2, pick2, radius: float):
+    """``(center, t1, t2)`` of the radius circle tangent to both objects,
+    the candidate whose tangent points are closest to the picks -- CIRCLE
+    Ttr's rule, and FILLET's ("select the objects close to where you want
+    the endpoints of the fillet"). Radius 0 is where the two meet. Raises
+    ValueError when there is none."""
     best = None
     best_score = None
     for locus1 in _tangent_loci(obj1, radius):
@@ -502,7 +511,7 @@ def ttr_center(obj1, pick1, obj2, pick2, radius: float):
                 t2 = _tangent_point(obj2, center)
                 score = math.dist(t1, pick1) + math.dist(t2, pick2)
                 if best_score is None or score < best_score:
-                    best, best_score = center, score
+                    best, best_score = (center, t1, t2), score
     if best is None:
         raise ValueError("circle does not exist")
     return best

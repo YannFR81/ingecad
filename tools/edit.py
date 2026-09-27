@@ -814,7 +814,7 @@ class FilletTool(Tool):
     def start(self) -> None:
         self.name = "FILLET"
         self._first = None
-        self.prompt("FILLET (radius {radius}) select first line or [Radius]:",
+        self.prompt("FILLET (radius {radius}) select first object or [Radius]:",
                     radius=type(self).radius)
 
     def on_option(self, text: str) -> bool:
@@ -836,22 +836,25 @@ class FilletTool(Tool):
                 return True
             type(self).radius = r
             self._waiting_radius = False
-            self.prompt("Select first line:")
+            self.prompt("Select first object:")
             return True
         return False
 
     def on_point(self, point: Point) -> None:
         entity = self.ctx.services.pick_entity(point)
-        if entity is None or entity.dxftype() != "LINE":
-            self.ctx.echo(tr("FILLET supports LINE pairs for now."))
+        if entity is None or entity.dxftype() not in ("LINE", "ARC", "CIRCLE"):
+            self.ctx.echo(tr("FILLET joins lines, arcs and circles."))
             return
         if self._first is None:
             self._first = entity
             self._first_pick = point
-            self.prompt("Select second line:")
+            self.prompt("Select second object:")
             return
         if entity is self._first:
-            self.ctx.echo(tr("Pick a different line."))
+            self.ctx.echo(tr("Pick a different object."))
+            return
+        if "LINE" != entity.dxftype() or "LINE" != self._first.dxftype():
+            self._fillet_curves(entity, point)
             return
         s1 = (self._first.dxf.start.x, self._first.dxf.start.y,
               self._first.dxf.end.x, self._first.dxf.end.y)
@@ -919,6 +922,60 @@ class FilletTool(Tool):
             [(lambda msp, f=f, src=src: inherit_style(f(msp), src))
              for f, src in zip(factories, sources)]))
         self.ctx.finish()
+
+
+    def _fillet_curves(self, entity, pick) -> None:
+        """FILLET with an arc or a circle in the pair: the fillet arc is
+        tangent to both, the one whose ends are nearest the picks; lines and
+        arcs are trimmed or extended to it, circles are left whole
+        ("FILLET does not trim circles")."""
+        from core.modify import common_style_source, inherit_style
+
+        pairs = [(self._first, self._first_pick), (entity, pick)]
+        objs = [_tangent_obj(e) for e, _p in pairs]
+        radius = type(self).radius
+        try:
+            center, t1, t2 = actions.tangent_circle(
+                objs[0], pairs[0][1], objs[1], pairs[1][1], radius)
+        except ValueError:
+            self.ctx.echo(tr("Radius does not fit.") if radius > 0
+                          else tr("The objects do not meet."))
+            self.ctx.finish()
+            return
+        olds, factories = [], []
+        for (e, p), t in zip(pairs, (t1, t2)):
+            kind = e.dxftype()
+            if kind == "LINE":
+                seg = (e.dxf.start.x, e.dxf.start.y, e.dxf.end.x, e.dxf.end.y)
+                n = editmath.trim_line_to(seg, t, p)
+                factories.append(lambda msp, n=n, e=e: inherit_style(
+                    msp.add_line((n[0], n[1]), (n[2], n[3])), e))
+            elif kind == "ARC":
+                cx, cy, r, a0, a1 = ocs.arc_wcs(e)
+                b0, b1 = editmath.trim_arc_to((cx, cy), a0, a1, t, p)
+                factories.append(lambda msp, c=(cx, cy), r=r, b0=b0, b1=b1,
+                                 e=e: inherit_style(msp.add_arc(c, r, b0, b1), e))
+            else:
+                continue                      # a circle stays whole
+            olds.append(e)
+        if radius > 0:
+            a0, a1 = editmath.arc_between(center, t1, t2)
+            source = common_style_source([self._first, entity])
+            factories.append(lambda msp: inherit_style(
+                msp.add_arc(center, radius, a0, a1), source))
+        if factories:
+            self.ctx.execute(actions.ReplaceEntitiesCommand(
+                "FILLET", olds, factories))
+        self.ctx.finish()
+
+
+def _tangent_obj(entity):
+    """A LINE, ARC or CIRCLE as the tangent solver's object (WCS)."""
+    if entity.dxftype() == "LINE":
+        s, e = entity.dxf.start, entity.dxf.end
+        return ("line", (s.x, s.y), (e.x, e.y))
+    cx, cy, r = ocs.circle_wcs(entity)
+    return ("circle", (cx, cy), r)
 
 
 def _entity_bbox(entity):

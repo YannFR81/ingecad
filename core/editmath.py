@@ -523,6 +523,48 @@ def fillet_parallel(s1: Seg, pick1: Point, s2: Seg):
     return new_s2, (center, r, a0 % 360.0, a1 % 360.0)
 
 
+def trim_line_to(seg: Seg, point: Point, pick: Point) -> Seg:
+    """FILLET's cut of a line at ``point`` (on its infinite line): keep the
+    part on the pick's side, extending the line when the point is past
+    its end."""
+    ends = ((seg[0], seg[1]), (seg[2], seg[3]))
+    toward = (pick[0] - point[0], pick[1] - point[1])
+
+    def along(p):
+        return (p[0] - point[0]) * toward[0] + (p[1] - point[1]) * toward[1]
+
+    kept = max(ends, key=along)
+    return (kept[0], kept[1], point[0], point[1])
+
+
+def trim_arc_to(center: Point, a0: float, a1: float, point: Point,
+                pick: Point) -> tuple[float, float]:
+    """FILLET's cut of an arc (ccw ``a0``..``a1``, degrees) at ``point`` on
+    its circle: ``(new_a0, new_a1)``. Inside the arc, keep the piece the
+    pick is on; outside, extend the nearer end to the point."""
+    at = math.degrees(math.atan2(point[1] - center[1], point[0] - center[0]))
+    span = (a1 - a0) % 360.0 or 360.0
+    if (at - a0) % 360.0 <= span:
+        picked = math.degrees(math.atan2(pick[1] - center[1],
+                                         pick[0] - center[0]))
+        if (picked - a0) % 360.0 <= (at - a0) % 360.0:
+            return a0, at % 360.0
+        return at % 360.0, a1
+    # past an end: grow the end the point is nearer to
+    if (a0 - at) % 360.0 <= (at - a1) % 360.0:
+        return at % 360.0, a1
+    return a0, at % 360.0
+
+
+def arc_between(center: Point, p: Point, q: Point) -> tuple[float, float]:
+    """The ccw angles of the shorter arc of a circle from ``p`` to ``q``."""
+    a = math.degrees(math.atan2(p[1] - center[1], p[0] - center[0]))
+    b = math.degrees(math.atan2(q[1] - center[1], q[0] - center[0]))
+    if (b - a) % 360.0 > 180.0:
+        a, b = b, a
+    return a % 360.0, b % 360.0
+
+
 def chamfer_pieces(s1: Seg, s2: Seg, d1: float, d2: float):
     """CHAMFER: the two trimmed lines and the bevel that joins them.
 
