@@ -1,5 +1,74 @@
 # Changelog
 
+## v0.6.4 — 2026-09-27
+
+Save as DWG that holds on real drawings, the drafting commands made to
+follow AutoCAD's own flow prompt by prompt, and the multi-second freezes a
+performance audit found before this release. LibreDWG is now IngeCAD's
+only DWG engine: Open CAD Studio is no longer used, and with it goes the
+"DWG 2018 — Open CAD Studio" entry of Save As.
+
+### Save as DWG
+- **213 real drawings saved and reopened: 116 → 185 open cleanly in ODA
+  and IngeCAD**; the save itself failing went 55 → 7, and no drawing loses
+  entities any more. Fixed in LibreDWG (vendored, re-based on 0.14.8597):
+  Civil 3D proxies keep their graphics and their class, a proxy newer than
+  the target format is written as the target's, a large proxy graphic no
+  longer corrupts every object after it, FIELD lists keep their fields,
+  accents survive in pre-2007 dictionary keys, 3-point angular dimensions
+  import. In IngeCAD: a leader with a single vertex is kept (ezdxf dropped
+  it on every save, DXF too), FIELD objects and binary blobs no longer stop
+  the save.
+
+### Drawing like in AutoCAD
+- **FILLET** with AutoCAD's flow: `Current settings: Mode = TRIM, Radius =`,
+  `[Undo/Polyline/Radius/Trim/Multiple]`, Shift on the second pick for a
+  sharp corner, Trim / No trim shared with CHAMFER (TRIMMODE); fillets
+  between lines, arcs and circles (circles are not trimmed), and two
+  parallel lines joined by a semicircle.
+- **One-shot object snaps**: type END, MID, CEN, TAN, PER, INT, NEA, QUA,
+  NOD, INS or NONE at a point prompt (answered with "of"/"to"), or pick one
+  from the Shift + right-click menu, now in AutoCAD's order; the **FROM**
+  and **M2P** point modifiers.
+- **Deferred tangent**: a line tangent to two circles, as in AutoCAD.
+- **Extension and Parallel** object snaps, tracked as in AutoCAD.
+- **Draw ▸ Circle** is the classic submenu, with **Tan, Tan, Tan** — CIRCLE
+  3P with a tangent on each point, typed or from the menu.
+- **MIRROR keeps text readable** (MIRRTEXT = 0, AutoCAD's default; new
+  drawings start there, and MIRRTEXT is a system variable).
+- **CLAYER** sets the current layer by name.
+- **LAYOUT ▸ Copy** and the tab menu's **Move or Copy...**.
+- **REINIT** shows the Re-initialization dialog.
+- TRIM and EXTEND find tangency points; mirrored arcs are no longer
+  "ghosts" that could not be selected; a window selection no longer takes
+  an arc outside it.
+
+### Spanish and classrooms
+- A **Spanish AutoCAD acad.pgp works** as it is (DE, *DESPLAZA), read in
+  ANSI or UTF-8; *Tools ▸ Customize ▸ Edit Program Parameters (acad.pgp)*
+  opens it. The Spanish command names were checked against Autodesk's
+  Spanish help: DESCOMP, ACOANGULAR, ACOESTIL, GUARDAR, GUARDARCOMO
+  corrected; GUARDARR, REINICIA, EDITPOL, CALCURAPIDA and more added.
+- **Classroom and office defaults**: one folder, `/etc/ingecad/`, with a
+  `defaults.ini` and an `acad.pgp` for every account on a machine; each
+  user's own settings still win. The README has a classroom example.
+
+### Performance
+Measured end to end against 0.6.3 on real plans before this release —
+opening, zoom and pan, drawing, window selection, colour changes,
+Ctrl+C/X/V, ERASE, COPY, each undone, and Save as DWG:
+- Undo of an edit over a whole 10 000-object sheet froze the window 7–8 s;
+  now under one second, the redraw finishing in the background.
+- The first mouse move on a big plan right after opening no longer stalls.
+- MOVE, COPY, ROTATE, SCALE, MIRROR, paste, array and stretch over a
+  selection with a Civil 3D proxy or an OLE object no longer fail half-way
+  (and leave no undo): those objects stay put and the command says so.
+- Everything else measured the same as 0.6.3.
+
+### Packaging
+- 0.6.3 did not open on Arch or Debian testing: the AppImage and tarball
+  now leave libstdc++ and fontconfig to the system.
+
 ## v0.6.3 — 2026-09-22
 
 What two testers found using 0.6.2 — a second video from Rafael and a

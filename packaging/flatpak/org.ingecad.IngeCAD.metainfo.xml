@@ -82,6 +82,12 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.6.4" date="2026-09-27">
+      <description>
+        <p>Save as DWG holds on real drawings (Civil 3D proxies keep their graphics; 116 to 185 of 213 test drawings reopen cleanly), FILLET, object snaps and CIRCLE follow AutoCAD's own flow, a Spanish AutoCAD acad.pgp works, classroom defaults, and no more multi-second freezes when undoing big edits.</p>
+        <p xml:lang="es">Guardar como DWG resiste planos reales (los proxies de Civil 3D conservan sus gráficos; de 213 planos de prueba, 185 se reabren bien, antes 116), EMPALME, las referencias a objetos y CÍRCULO siguen el flujo de AutoCAD, funciona el acad.pgp de un AutoCAD en español, configuración común para aulas, y deshacer ediciones grandes ya no congela la ventana varios segundos.</p>
+      </description>
+    </release>
     <release version="0.6.3" date="2026-09-22">
       <description>
         <p>What two testers found in 0.6.2: importing survey points died
