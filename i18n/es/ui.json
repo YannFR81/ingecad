@@ -1464,5 +1464,19 @@
   "Dynamic input": "Entrada dinámica",
   "{count} annotative objects keep only their default scale in the DWG; save as DXF to keep every scale": "{count} objetos anotativos conservan en el DWG solo su escala por defecto; guarde como DXF para conservar todas las escalas",
   "Sidebar": "Barra lateral",
-  "Show or hide the sidebar (Ctrl+F5)": "Mostrar u ocultar la barra lateral (Ctrl+F5)"
+  "Show or hide the sidebar (Ctrl+F5)": "Mostrar u ocultar la barra lateral (Ctrl+F5)",
+  "All layers have been thawed.": "Se han reutilizado todas las capas.",
+  "Cannot freeze layer \"{name}\". It is the current layer.": "No se puede inutilizar la capa \"{name}\". Es la capa actual.",
+  "Layer \"{name}\" has been frozen.": "La capa \"{name}\" se ha inutilizado.",
+  "Layer \"{name}\" has been locked.": "La capa \"{name}\" se ha bloqueado.",
+  "Layer \"{name}\" has been unlocked.": "La capa \"{name}\" se ha desbloqueado.",
+  "Layer Freeze": "Inutilizar capa",
+  "Layer Lock": "Bloquear capa",
+  "Layer Unlock": "Desbloquear capa",
+  "No layers are frozen.": "No hay capas inutilizadas.",
+  "Select an object on a layer to be frozen or [Undo]:": "Designe un objeto de la capa que se va a inutilizar o [desHacer(U)]:",
+  "Select an object on the layer to be locked:": "Designe un objeto de la capa que se va a bloquear:",
+  "Select an object on the layer to be unlocked:": "Designe un objeto de la capa que se va a desbloquear:",
+  "thaw all layers": "reutilizar todas las capas",
+  "Thaw All Layers": "Reutilizar todas las capas"
 }

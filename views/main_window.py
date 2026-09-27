@@ -1152,6 +1152,10 @@ class MainWindow(QMainWindow):
         cmd_item(layer_tools, tr("Layer Unisolate"), "LAYUNISO", icon=False)
         cmd_item(layer_tools, tr("Layer Off"), "LAYOFF", icon=False)
         cmd_item(layer_tools, tr("Turn All Layers On"), "LAYON", icon=False)
+        cmd_item(layer_tools, tr("Layer Freeze"), "LAYFRZ", icon=False)
+        cmd_item(layer_tools, tr("Thaw All Layers"), "LAYTHW", icon=False)
+        cmd_item(layer_tools, tr("Layer Lock"), "LAYLCK", icon=False)
+        cmd_item(layer_tools, tr("Layer Unlock"), "LAYULK", icon=False)
         format_menu.addSeparator()
         item(format_menu, tr("Text Style..."), self.toggle_styles_panel,
              icon="STYLE")
@@ -2944,13 +2948,15 @@ class MainWindow(QMainWindow):
                      "DIST", "ID", "AREA", "LIST",
                      "STRETCH", "BREAK", "JOIN",
                      "CHAMFER", "ARRAY", "MATCHPROP", "PEDIT",
-                     "DRAWORDER", "LAYISO", "LAYOFF", "IMAGEATTACH",
+                     "DRAWORDER", "LAYISO", "LAYOFF", "LAYFRZ", "LAYLCK",
+                     "LAYULK", "IMAGEATTACH",
                      "TABLE", "PDFATTACH", "IMAGEADJUST", "TRANSPARENCY"):
             d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         d.register("ADJUST", lambda *a: self.tools.start_tool("IMAGEADJUST"))
         d.register("CLEANSCREENON", lambda *a: self._clean_screen(True))
         d.register("CLEANSCREENOFF", lambda *a: self._clean_screen(False))
         d.register("LAYON", lambda *a: self._cmd_layon())
+        d.register("LAYTHW", lambda *a: self._cmd_laythw())
         d.register("LAYUNISO", lambda *a: self._cmd_layuniso())
         d.register("SAVE", lambda *a: self.save_document())
         d.register("QSAVE", lambda *a: self.save_document())
@@ -3746,6 +3752,23 @@ class MainWindow(QMainWindow):
             return
         self.history.execute(CompositeCommand(tr("all layers on"), commands))
         self.command_line.echo(tr("All layers have been turned on."))
+        self.regen_in_memory()
+
+    def _cmd_laythw(self) -> None:
+        """LAYTHW: thaw every layer, one undo step (p. 1019)."""
+        from core.commands import CompositeCommand
+        from core.layers import LayerPropertyCommand
+
+        if self.document is None:
+            return
+        commands = [LayerPropertyCommand(layer.dxf.name, "frozen", False)
+                    for layer in self.document.doc.layers
+                    if layer.is_frozen()]
+        if not commands:
+            self.command_line.echo(tr("No layers are frozen."))
+            return
+        self.history.execute(CompositeCommand(tr("thaw all layers"), commands))
+        self.command_line.echo(tr("All layers have been thawed."))
         self.regen_in_memory()
 
     def _cmd_layuniso(self) -> None:

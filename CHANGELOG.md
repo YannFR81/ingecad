@@ -15,6 +15,11 @@
   Right-click the column headers to bring it back; the choice is kept.
 - **A new PAN icon** (#32): AutoCAD's open hand in outline, like the rest
   of the toolbar, instead of a box with four lines.
+- **LAYFRZ, LAYTHW, LAYLCK, LAYULK** (#40), with AutoCAD's prompts and in
+  Format ▸ Layer Tools: freeze the layer of each object you pick (Undo
+  takes back the last one; the current layer is refused), thaw every
+  layer in one undo step, and lock or unlock a layer by picking one of
+  its objects -- LAYULK reaches objects on the locked layer itself.
 
 ### Fixes
 - **The grid no longer flickers when zooming or panning.** The frame that

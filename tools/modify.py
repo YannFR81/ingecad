@@ -702,6 +702,88 @@ class LayOffTool(Tool):
         self.ctx.finish()
 
 
+class LayFrzTool(Tool):
+    """LAYFRZ: freeze the layer of each picked object, until Enter.
+
+    AutoCAD's prompt, less the Settings branch (viewport and block
+    nesting), as LAYOFF already does. The current layer cannot be frozen.
+    """
+
+    entity_picker = True
+
+    def start(self) -> None:
+        self.name = "LAYFRZ"
+        self.prompt("Select an object on a layer to be frozen or [Undo]:")
+
+    def on_point(self, point: Point) -> None:
+        services = self.ctx.services
+        entity = services.pick_entity(point) if services else None
+        if entity is None:
+            return
+        from core.layers import LayerPropertyCommand
+
+        name = entity.dxf.get("layer", "0")
+        document = services.window.document
+        if name == document.doc.header.get("$CLAYER", "0"):
+            self.ctx.echo(tr('Cannot freeze layer "{name}". It is the current '
+                             'layer.', name=name))
+            return
+        self.ctx.execute(LayerPropertyCommand(name, "frozen", True))
+        self.ctx.echo(tr('Layer "{name}" has been frozen.', name=name))
+
+    def on_option(self, text: str) -> bool:
+        if (self.option(text) or text.strip().upper()) in ("U", "UNDO"):
+            self.ctx.undo_last()
+            return True
+        return False
+
+    def on_enter(self) -> None:
+        self.ctx.finish()
+
+
+class _LayerLockTool(Tool):
+    """LAYLCK / LAYULK: lock or unlock the layer of ONE picked object."""
+
+    entity_picker = True
+    command = ""
+    lock = True
+
+    def start(self) -> None:
+        self.name = self.command
+        if self.lock:
+            self.prompt("Select an object on the layer to be locked:")
+        else:
+            self.prompt("Select an object on the layer to be unlocked:")
+
+    def on_point(self, point: Point) -> None:
+        services = self.ctx.services
+        entity = services.pick_entity(point) if services else None
+        if entity is None:
+            return
+        from core.layers import LayerPropertyCommand
+
+        name = entity.dxf.get("layer", "0")
+        self.ctx.execute(LayerPropertyCommand(name, "locked", self.lock))
+        if self.lock:
+            self.ctx.echo(tr('Layer "{name}" has been locked.', name=name))
+        else:
+            self.ctx.echo(tr('Layer "{name}" has been unlocked.', name=name))
+        self.ctx.finish()
+
+    def on_enter(self) -> None:
+        self.ctx.finish()
+
+
+class LayLckTool(_LayerLockTool):
+    command = "LAYLCK"
+    lock = True
+
+
+class LayUlkTool(_LayerLockTool):
+    command = "LAYULK"
+    lock = False
+
+
 class ImageAdjustTool(Tool):
     """-IMAGEADJUST: option, then a 0-100 value, applied to the selection.
 
@@ -1063,6 +1145,9 @@ MODIFY_TOOL_CLASSES = {
     "DRAWORDER": DrawOrderTool,
     "LAYISO": LayIsoTool,
     "LAYOFF": LayOffTool,
+    "LAYFRZ": LayFrzTool,
+    "LAYLCK": LayLckTool,
+    "LAYULK": LayUlkTool,
     "IMAGEADJUST": ImageAdjustTool,
     "TRANSPARENCY": ImageTransparencyTool,
     "ISOLATEOBJECTS": IsolateObjectsTool,
