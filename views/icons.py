@@ -11,7 +11,8 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import (QBrush, QColor, QIcon, QPainter, QPainterPath, QPen,
+                           QPixmap, QPolygonF, QTransform)
 
 # Sampled from AutoCAD's own dark-theme ribbon (2026-08-11 screenshot):
 # the primary geometry is near-white and the SECOND object — the copies, the
@@ -720,12 +721,34 @@ def _zoom_window():
     return pm
 
 
+def _finger(x0: float, y0: float, x1: float, y1: float, w: float) -> QPainterPath:
+    """A rounded finger from its base (x0, y0) to its tip (x1, y1)."""
+    length = math.hypot(x1 - x0, y1 - y0)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(-w / 2, -length, w, length + w / 2), w / 2, w / 2)
+    turn = QTransform()
+    turn.translate(x0, y0)
+    turn.rotate(math.degrees(math.atan2(x1 - x0, -(y1 - y0))))
+    return turn.map(path)
+
+
 def _pan():
+    # AutoCAD's open hand, in outline like the rest of the set: palm, four
+    # spread fingers and the thumb out to the left (Marco picked it,
+    # 2026-09-27, over a filled one; #32).
     pm, p = _canvas()
-    # the classic open hand, simplified: palm + four fingers
-    p.drawRoundedRect(QRectF(7, 10, 10, 10), 3, 3)
-    for i, x in enumerate((8.5, 11.2, 13.9, 16.6)):
-        p.drawLine(QPointF(x, 11), QPointF(x, 4.5 if i in (1, 2) else 6))
+    hand = QPainterPath()
+    hand.addRoundedRect(QRectF(6.6, 10.6, 11.0, 10.4), 4.2, 4.2)
+    for finger in (_finger(8.1, 12.0, 7.4, 4.6, 2.5),      # index
+                   _finger(10.9, 12.0, 10.9, 3.2, 2.5),    # middle
+                   _finger(13.7, 12.0, 14.4, 4.0, 2.5),    # ring
+                   _finger(16.2, 13.0, 17.8, 6.8, 2.3),    # little
+                   _finger(7.4, 17.0, 3.2, 11.8, 2.6)):    # thumb
+        hand = hand.united(finger)
+    pen = QPen(_STROKE, 1.3)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.drawPath(hand.simplified())
     p.end()
     return pm
 

@@ -13,6 +13,8 @@
 - **The Layers panel starts without the Description column**: almost nobody
   fills it in, and in the sidebar it took the room the values need.
   Right-click the column headers to bring it back; the choice is kept.
+- **A new PAN icon** (#32): AutoCAD's open hand in outline, like the rest
+  of the toolbar, instead of a box with four lines.
 
 ### Fixes
 - **The grid no longer flickers when zooming or panning.** The frame that
