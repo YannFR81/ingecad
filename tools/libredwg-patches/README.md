@@ -3,7 +3,21 @@
 IngeCAD embeds LibreDWG's `dwg2dxf`/`dxf2dwg` as satellite converters
 (`vendor/libredwg/bin`, gitignored).
 
-## Current state — 2026-09-27: the 2026-09-24 stack + Save-as-DWG fixes for fields, accents and proxies
+## Current state — 2026-09-27: re-based on 0.14.8597
+
+`current/ingecad-vendor-0.14.8597.patch` carries everything below onto the
+0.14.8597 release (2026-09-10; 15 commits since 0.14.8580, among them an
+undersized realloc in `bit_copy_chain`, bounds on the codepage index, the
+MTEXT background scale read as BD, and two `cquote` fixes). #1392 (EED
+1070/1071 signed) is in that release and left the patch; every other hunk
+applied unchanged. `build-vendor.sh` and the Flatpak manifest point at it.
+
+Measured against the 0.14.8580 build with the same patches: `dwg2dxf` over
+all 1657 corpus drawings gives the same result and entity count in every
+one; the save sweep over 213 drawings opens in ODA and IngeCAD 182 -> 185,
+none worse. `make check` 270/0.
+
+## Previous state — 2026-09-27: the 2026-09-24 stack + Save-as-DWG fixes for fields, accents and proxies
 
 Same base and patches as below, plus three fixes to `src/in_dxf.c` found by
 sweeping the corpus through IngeCAD's real save path (`load_dwg` →

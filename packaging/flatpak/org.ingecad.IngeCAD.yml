@@ -153,7 +153,7 @@ modules:
       - install -Dm755 _prefix/bin/dxf2dwg ${FLATPAK_DEST}/ingecad/vendor/libredwg/bin/dxf2dwg
     sources:
       - type: archive
-        url: https://github.com/LibreDWG/libredwg/releases/download/0.14.8580/libredwg-0.14.8580.tar.xz
-        sha256: 2b6e866e58b421c9baa2c64bafb9b1325480a9e102935e149d19f96a7193cd9d
+        url: https://github.com/LibreDWG/libredwg/releases/download/0.14.8597/libredwg-0.14.8597.tar.xz
+        sha256: af2646681858a78d756cfb9e0eeb6901f61be3d09ae8f56a98e94b1490dec4ed
       - type: patch
-        path: ../../tools/libredwg-patches/current/ingecad-vendor-0.14.8580.patch
+        path: ../../tools/libredwg-patches/current/ingecad-vendor-0.14.8597.patch
