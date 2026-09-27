@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Interface
+- **The right sidebar folds away with one click** (#47), as in IngeTrazo: a
+  slim handle sits on the line where the sidebar is resized, half-way down
+  the drawing; click it and the drawing takes the whole width, click it
+  again and the sidebar comes back at the width it had. **View ▸ Sidebar
+  (Ctrl+F5)** is the same toggle, the next session opens the way this one
+  closed, and LA, PROPERTIES or STYLE unfold it on their own. It replaces
+  the small `›` button and the thin strip it left behind.
+- **The Layers panel starts without the Description column**: almost nobody
+  fills it in, and in the sidebar it took the room the values need.
+  Right-click the column headers to bring it back; the choice is kept.
+
 ## v0.6.4 — 2026-09-27
 
 Save as DWG that holds on real drawings, the drafting commands made to

@@ -145,3 +145,25 @@ def test_columns_can_be_hidden_from_the_header_menu(qapp):
     panel._toggle_column(9, True)
     assert not panel.table.isColumnHidden(9)
     assert 1 not in panel.HIDEABLE, "Name must not be hideable"
+
+
+def test_description_starts_hidden_until_the_user_shows_it(qapp):
+    """Almost nobody fills in a layer's description, and in the sidebar it
+    took the room the values need (Marco, 2026-09-27): off by default; a
+    stored choice -- even "show every column" -- wins."""
+    from PySide6.QtCore import QSettings
+
+    settings = QSettings()
+    before = settings.value("layers/hidden_columns")
+    try:
+        settings.remove("layers/hidden_columns")
+        panel = _panel(qapp, _document(3))
+        assert panel.table.isColumnHidden(9)
+        assert not any(panel.table.isColumnHidden(c) for c in VALUE_COLUMNS)
+        panel._toggle_column(9, True)              # the header menu
+        assert _panel(qapp, _document(3)).table.isColumnHidden(9) is False
+    finally:
+        if before is None:
+            settings.remove("layers/hidden_columns")
+        else:
+            settings.setValue("layers/hidden_columns", before)

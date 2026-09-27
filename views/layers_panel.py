@@ -293,8 +293,13 @@ class LayersPanel(QWidget):
     #: without names is not a layer list.
     HIDEABLE = (0, 2, 3, 4, 5, 6, 7, 8, 9)
 
+    #: Hidden until the user asks for it: Description is free text almost
+    #: nobody fills in, and in a sidebar it cost the room the values need
+    #: (Marco, 2026-09-27). A stored choice, even "show all", wins.
+    DEFAULT_HIDDEN = "9"
+
     def _restore_hidden_columns(self) -> None:
-        stored = QSettings().value("layers/hidden_columns", "")
+        stored = QSettings().value("layers/hidden_columns", self.DEFAULT_HIDDEN)
         hidden = {int(c) for c in str(stored or "").split(",") if c.strip().isdigit()}
         for col in self.HIDEABLE:
             self.table.setColumnHidden(col, col in hidden)
