@@ -1320,3 +1320,100 @@ def test_a_layout_that_already_numbers_its_viewports_is_untouched(doc):
 def test_the_repair_never_reaches_the_model(doc):
     doc.doc.modelspace().add_line((0, 0), (10, 10))
     assert layout_ops.repair_viewport_status(doc.doc) == 0
+
+
+# -- LAYOUT Copy (#9) and Move or Copy ----------------------------------------
+
+def _sheet_with_viewport(doc):
+    """Layout1 set up like a real sheet: A3 page, a title line, a viewport
+    at 1:50 on some model point."""
+    layout = doc.doc.layouts.get("Layout1")
+    layout.page_setup(size=(420, 297), margins=(10, 10, 10, 10), units="mm")
+    layout.add_line((20, 20), (400, 20))
+    vp = layout.add_viewport(center=(210, 150), size=(200, 120),
+                             view_center_point=(500, 300), view_height=6000)
+    vp.dxf.status = 2
+    vp.dxf.id = 2
+    return layout, vp
+
+
+def test_layout_copy_follows_autocads_prompts_and_names(doc):
+    _sheet_with_viewport(doc)
+    history = History(doc)
+    echoes, _s, prompt = drive(doc, history, "C", current="Layout1")
+    assert prompt.text == "Enter name of layout to copy <Layout1>:"
+    prompt = prompt.on_input("")                  # the current layout
+    assert prompt.text == "Enter layout name for copy <Layout1 (2)>:"
+    prompt = prompt.on_input("")                  # the default name
+    assert prompt is None
+    assert 'Layout "Layout1" copied to "Layout1 (2)".' in echoes
+    # "The new tab is inserted before the copied layout tab."
+    assert layout_ops.layout_names(doc) == ["Model", "Layout1 (2)", "Layout1"]
+    echoes, _s, _p = drive(doc, history, "C", "Layout1", "")
+    assert "Layout1 (3)" in layout_ops.layout_names(doc)
+
+
+def test_layout_copy_carries_the_page_setup_and_the_viewports(doc):
+    src, vp = _sheet_with_viewport(doc)
+    history = History(doc)
+    drive(doc, history, "C", "Layout1", "Planta 2")
+    copy = doc.doc.layouts.get("Planta 2")
+    keys = ("paper_width", "paper_height", "left_margin", "plot_paper_units",
+            "scale_numerator", "scale_denominator")
+    for key in keys:
+        assert copy.dxf_layout.dxf.get(key) == src.dxf_layout.dxf.get(key), key
+    kinds = sorted(e.dxftype() for e in copy)
+    assert kinds == sorted(e.dxftype() for e in src)
+    twin = next(e for e in copy if e.dxftype() == "VIEWPORT" and e.dxf.id == 2)
+    assert twin.dxf.view_height == vp.dxf.view_height
+    assert twin.dxf.view_center_point == vp.dxf.view_center_point
+    assert twin.dxf.handle != vp.dxf.handle
+    main = copy.dxf_layout.dxf.get("viewport_handle")
+    assert main and main in {e.dxf.handle for e in copy}
+
+
+def test_layout_copy_is_one_undo_and_refuses_bad_names(doc):
+    _sheet_with_viewport(doc)
+    history = History(doc)
+    before = layout_ops.layout_names(doc)
+    drive(doc, history, "C", "Layout1", "Planta 2")
+    history.undo()
+    assert layout_ops.layout_names(doc) == before
+    echoes, _s, _p = drive(doc, history, "C", "Layout1", "LAYOUT1")
+    assert any("already exists" in e for e in echoes)     # case-insensitive
+    echoes, _s, _p = drive(doc, history, "C", "Model")
+    assert any("Model tab cannot be copied" in e for e in echoes)
+
+
+def test_move_layout_reorders_and_undoes(doc):
+    history = History(doc)
+    history.execute(layout_ops.NewLayoutCommand("B"))
+    history.execute(layout_ops.NewLayoutCommand("C"))
+    history.execute(layout_ops.MoveLayoutCommand("C", "Layout1"))
+    assert layout_ops.layout_names(doc) == ["Model", "C", "Layout1", "B"]
+    history.execute(layout_ops.MoveLayoutCommand("C", None))  # to the end
+    assert layout_ops.layout_names(doc) == ["Model", "Layout1", "B", "C"]
+    history.undo()
+    assert layout_ops.layout_names(doc) == ["Model", "C", "Layout1", "B"]
+
+
+def test_move_or_copy_from_the_tab_menu(qapp):
+    from views.layout_move_dialog import MoveOrCopyDialog
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    try:
+        names = layout_ops.layout_names(win.document)
+        dialog = MoveOrCopyDialog(win, names, "Layout1")
+        labels = [dialog.list.item(i).text() for i in range(dialog.list.count())]
+        assert labels[-1] == "(move to end)"
+        dialog.list.setCurrentRow(len(labels) - 1)
+        assert dialog.before() is None
+        win.move_or_copy_layout("Layout1", dialog.before(), copy=True)
+        assert layout_ops.layout_names(win.document)[-1] == "Layout1 (2)"
+        win.history.undo()
+        assert "Layout1 (2)" not in layout_ops.layout_names(win.document)
+    finally:
+        win.document.dirty = False
+        win.close()

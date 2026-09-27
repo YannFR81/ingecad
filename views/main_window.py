@@ -4006,6 +4006,8 @@ class MainWindow(QMainWindow):
                            lambda: self._delete_layout_tab(name))
             menu.addAction(tr("Rename"),
                            lambda: self._rename_layout_tab(name))
+            menu.addAction(tr("Move or Copy..."),
+                           lambda: self._move_or_copy_layout_tab(name))
             menu.addSeparator()
             # AutoCAD's tab menu carries these two as well.
             menu.addAction(tr("Page Setup..."),
@@ -4030,6 +4032,30 @@ class MainWindow(QMainWindow):
         # AutoCAD adds the tab without activating it.
         self._refresh_layout_tabs()
         self.command_line.echo(tr('Layout "{name}" created.', name=name))
+
+    def _move_or_copy_layout_tab(self, name: str) -> None:
+        """The tab menu's Move or Copy..., as in AutoCAD."""
+        from core import layouts as layout_ops
+        from views.layout_move_dialog import MoveOrCopyDialog
+
+        dialog = MoveOrCopyDialog(self, layout_ops.layout_names(self.document),
+                                  name)
+        if dialog.exec():
+            self.move_or_copy_layout(name, dialog.before(),
+                                     dialog.copy.isChecked())
+
+    def move_or_copy_layout(self, name: str, before, copy: bool) -> None:
+        from core import layouts as layout_ops
+
+        if copy:
+            new = layout_ops.copy_name(self.document, name)
+            self.history.execute(
+                layout_ops.CopyLayoutCommand(name, new, before=before))
+            self.command_line.echo(tr('Layout "{source}" copied to "{name}".',
+                                      source=name, name=new))
+        elif before != name:
+            self.history.execute(layout_ops.MoveLayoutCommand(name, before))
+        self._refresh_layout_tabs()
 
     def _rename_layout_tab(self, name: str) -> None:
         from PySide6.QtWidgets import QInputDialog

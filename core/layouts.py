@@ -127,6 +127,101 @@ class RenameLayoutCommand(Command):
         document.dirty = True
 
 
+def copy_name(document, source: str) -> str:
+    """AutoCAD's name for an unnamed copy: the source's name with an
+    incremental number in parentheses -- "Layout1 (2)", "Layout1 (3)"."""
+    taken = {n.lower() for n in layout_names(document)}
+    i = 2
+    while f"{source} ({i})".lower() in taken:
+        i += 1
+    return f"{source} ({i})"
+
+
+def _taborders(doc) -> dict:
+    return {layout.name: layout.dxf_layout.dxf.taborder
+            for layout in doc.layouts if layout.name != "Model"}
+
+
+def _place_before(doc, name: str, before: Optional[str]) -> None:
+    """Renumber the tab order so ``name`` sits before ``before`` (None:
+    last), the others keeping their order."""
+    order = [n for n in doc.layouts.names_in_taborder()
+             if n != "Model" and n != name]
+    index = order.index(before) if before in order else len(order)
+    order.insert(index, name)
+    for number, tab in enumerate(order, start=1):
+        doc.layouts.get(tab).dxf_layout.dxf.taborder = number
+
+
+class CopyLayoutCommand(Command):
+    """LAYOUT Copy / Move or Copy: a new layout with the source's page setup
+    and everything on its sheet, viewports included (each keeps its number,
+    view and scale). "The new tab is inserted before the copied layout tab"
+    unless a place is given. One undo removes it and restores the order."""
+
+    #: Layout attributes that are the layout's identity, not its settings.
+    _IDENTITY = ("handle", "owner", "taborder", "name",
+                 "block_record_handle", "viewport_handle")
+
+    def __init__(self, source: str, copy: str,
+                 before: Optional[str] = "") -> None:
+        self.name = "LAYOUT Copy"
+        self.source = source
+        self.copy = copy
+        # "" = before the source (the LAYOUT command); None = at the end
+        self.before = source if before == "" else before
+        self._orders: dict = {}
+
+    def do(self, document) -> None:
+        doc = document.doc
+        self._orders = _taborders(doc)
+        src = doc.layouts.get(self.source)
+        new = doc.layouts.new(self.copy)
+        for key, value in src.dxf_layout.dxf.all_existing_dxf_attribs().items():
+            if key not in self._IDENTITY:
+                new.dxf_layout.dxf.set(key, value)
+        main = src.dxf_layout.dxf.get("viewport_handle")
+        for entity in src:
+            try:
+                clone = entity.copy()
+            except Exception:  # noqa: BLE001 -- a type ezdxf cannot copy
+                continue
+            new.add_entity(clone)
+            if main and entity.dxf.handle == main:
+                new.dxf_layout.dxf.viewport_handle = clone.dxf.handle
+        _place_before(doc, self.copy, self.before)
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        doc = document.doc
+        doc.layouts.delete(self.copy)
+        for tab, order in self._orders.items():
+            if tab in doc.layouts:
+                doc.layouts.get(tab).dxf_layout.dxf.taborder = order
+        document.dirty = True
+
+
+class MoveLayoutCommand(Command):
+    """Move or Copy without the copy: the tab goes before another (None:
+    to the end). Undo restores the previous order."""
+
+    def __init__(self, layout_name: str, before: Optional[str]) -> None:
+        self.name = "LAYOUT Move"
+        self.layout_name = layout_name
+        self.before = before
+        self._orders: dict = {}
+
+    def do(self, document) -> None:
+        self._orders = _taborders(document.doc)
+        _place_before(document.doc, self.layout_name, self.before)
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        for tab, order in self._orders.items():
+            document.doc.layouts.get(tab).dxf_layout.dxf.taborder = order
+        document.dirty = True
+
+
 def delete_layout(document, name: str) -> None:
     """Delete a layout and everything on it. Permanent, like AutoCAD warns
     ("The selected layout will be permanently deleted") — deliberately NOT a
@@ -1170,6 +1265,30 @@ def layout_command(
 
         return Prompt(tr("Enter new layout name:"), on_rename_new)
 
+    def on_copy_source(text: str) -> Optional[Prompt]:
+        source = find(text.strip() or paper_default())
+        if source is None:
+            echo(tr('Layout "{name}" does not exist.', name=text.strip()))
+            return None
+        if source.lower() == "model":
+            echo(tr("The Model tab cannot be copied."))
+            return None
+        default = copy_name(document, source)
+
+        def on_copy_name(text: str) -> None:
+            name = text.strip() or default
+            problem = validate_new_name(document, name)
+            if problem:
+                echo(problem)
+                return
+            history.execute(CopyLayoutCommand(source, name))
+            refresh()
+            echo(tr('Layout "{source}" copied to "{name}".',
+                    source=source, name=name))
+
+        return Prompt(tr("Enter layout name for copy <{name}>:",
+                         name=default), on_copy_name)
+
     def on_set(text: str) -> None:
         name = find(text.strip() or paper_default())
         if name is None:
@@ -1202,7 +1321,11 @@ def layout_command(
             echo(tr("Active layouts: {names}.",
                     names=", ".join(f'"{n}"' for n in names)))
             return None
-        if opt in ("C", "COPY", "T", "TEMPLATE", "SA", "SAVEAS"):
+        if opt in ("C", "COPY"):
+            return Prompt(
+                tr("Enter name of layout to copy <{name}>:",
+                   name=paper_default()), on_copy_source)
+        if opt in ("T", "TEMPLATE", "SA", "SAVEAS"):
             echo(tr("LAYOUT {option}: not available yet.", option=opt))
             return None
         echo(tr('Unknown LAYOUT option "{name}".', name=text.strip()))
