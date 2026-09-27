@@ -14,6 +14,13 @@
   fills it in, and in the sidebar it took the room the values need.
   Right-click the column headers to bring it back; the choice is kept.
 
+### Fixes
+- **The grid no longer flickers when zooming or panning.** The frame that
+  rebuilt the grid (the first after F7, a wheel notch or a pan across a
+  cell) drew it, and the red/green axes, with no shader program bound, so
+  both vanished until the next repaint -- "activo la grid y no se ve, en
+  cuanto paso el ratón se reescala" (Rafael's review).
+
 ## v0.6.4 — 2026-09-27
 
 Save as DWG that holds on real drawings, the drafting commands made to

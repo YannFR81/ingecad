@@ -1313,6 +1313,10 @@ class Viewport(QOpenGLWidget):
             self._grid_origin = (ox, oy)
             self._grid_buf = (vao, vbo, count, key)
         vao, _vbo, count, _key = self._grid_buf
+        # _make_vao releases the program: without binding it again, the
+        # frame that rebuilt the grid drew it -- and the axes after it --
+        # with no program at all, and the grid flickered on every zoom.
+        self._program.bind()
         self._program.setUniformValue(self._loc_mvp,
                                       self._mvp(*self._grid_origin))
         vao.bind()
