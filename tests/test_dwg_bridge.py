@@ -353,3 +353,15 @@ def test_real_open_cad_studio_roundtrips_a_drawing(tmp_path):
     kinds = sorted(e.dxftype() for e in doc.modelspace())
     assert kinds == ["CIRCLE", "LINE"]
     dwg_bridge._discard_temp_dxf(back)
+
+
+def test_open_cad_studio_appimage_is_found_whatever_the_case(tmp_path):
+    # #21: saved by the browser as ".appimage", it was never found
+    from formats.dwg_bridge import _ocs_appimages
+
+    for name in ("OpenCADStudio-0.9.1.appimage", "OpenCADStudio-0.9.2.AppImage",
+                 "opencadstudio.AppImage", "notes.txt", "Other-1.0.AppImage"):
+        (tmp_path / name).write_text("")
+    found = [p.name for p in _ocs_appimages(tmp_path)]
+    assert found == ["OpenCADStudio-0.9.2.AppImage",
+                     "OpenCADStudio-0.9.1.appimage", "opencadstudio.AppImage"]

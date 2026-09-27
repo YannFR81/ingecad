@@ -86,13 +86,33 @@ def _ocs_candidates() -> list[Path]:
         for folder in (home / "Aplicaciones", home / "Applications",
                        home / ".local" / "bin", home / "Descargas",
                        home / "Downloads", Path("/opt/opencadstudio")):
-            try:
-                images = sorted(folder.glob("OpenCADStudio-*.AppImage"))
-            except OSError:
-                images = []
-            out.extend(reversed(images))        # the newest version first
-            out.append(folder / "OpenCADStudio.AppImage")
+            out.extend(_ocs_appimages(folder))
     return out
+
+
+def _ocs_appimages(folder: Path) -> list[Path]:
+    """Open CAD Studio AppImages in ``folder``, the newest version first.
+
+    Matched without regard to case: the release is ``.AppImage`` on the
+    server, but browsers and download managers have been seen to save it
+    as ``.appimage`` (#21), and a name that only differs in case is the
+    same file to the user.
+    """
+    try:
+        names = [p for p in folder.iterdir() if p.is_file()]
+    except OSError:
+        return []
+    versioned, plain = [], []
+    for path in names:
+        lower = path.name.lower()
+        if not lower.endswith(".appimage"):
+            continue
+        if lower.startswith("opencadstudio-"):
+            versioned.append(path)
+        elif lower == "opencadstudio.appimage":
+            plain.append(path)
+    versioned.sort(key=lambda p: p.name.lower(), reverse=True)
+    return versioned + plain
 
 
 def find_opencadstudio() -> Optional[Path]:
