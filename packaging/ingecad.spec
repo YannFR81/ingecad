@@ -90,6 +90,23 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# Libraries the HOST must provide, never the bundle (issues #20, #21). The
+# bundle is built on Ubuntu 22.04 on purpose, so every system it starts on
+# has these at least as new. Bundling them is what broke 0.6.3 on Arch and
+# Debian testing: Qt loads the host's Mesa to make a GL context, Mesa pulls
+# in libSPIRV-Tools, and that needs GLIBCXX_3.4.32 -- which our older
+# libstdc++, loaded first, does not have. The driver failed to load, there
+# was no OpenGL under Wayland or X11, and the app never opened. The old
+# fontconfig could not parse those systems' configuration either (the
+# "invalid attribute 'xsi:nil'" lines of the report), and it drags the old
+# freetype with it. Measured on the 0.6.3 binaries in containers: without
+# these four, Arch and Debian testing open under Wayland and Ubuntu 22.04
+# still does. (PIL's own freetype has a hashed name and is not touched.)
+HOST_LIBRARIES = ("libstdc++.so.6", "libgcc_s.so.1",
+                  "libfontconfig.so.1", "libfreetype.so.6")
+a.binaries = [entry for entry in a.binaries
+              if Path(entry[0]).name not in HOST_LIBRARIES]
+
 exe = EXE(
     pyz,
     a.scripts,
