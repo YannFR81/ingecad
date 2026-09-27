@@ -3,7 +3,74 @@
 IngeCAD embeds LibreDWG's `dwg2dxf`/`dxf2dwg` as satellite converters
 (`vendor/libredwg/bin`, gitignored).
 
-## Current state — 2026-09-24: the 2026-08-13 stack + two EED fixes + annotative context data
+## Current state — 2026-09-27: the 2026-09-24 stack + Save-as-DWG fixes for fields, accents and proxies
+
+Same base and patches as below, plus three fixes to `src/in_dxf.c` found by
+sweeping the corpus through IngeCAD's real save path (`load_dwg` →
+`save_as` DWG → reopen, ODA File Converter as the judge), appended to
+`current/ingecad-vendor-0.14.8580.patch`:
+
+- **`Invalid DXF code 16 for DIMENSION_ANG3PT`.** Our July patch 0009 was
+  reimplemented upstream as `strEQc (name, "DIMENSION")`, but `name` is the
+  subtype by then, so it never matched: one 3-point angular dimension
+  aborted the whole import. `memBEGINc` makes it match. Hits every drawing
+  where a user dimensions an angle by three points.
+- **Dictionary keys lost their accents.** A pre-r2007 DXF is in the
+  drawing's codepage; `add_dictionary_itemhandles` and seven more importers
+  passed its bytes to `dwg_add_u8_input`, which expects UTF-8 and drops the
+  rest. A layout "Presentación1" came back as "Presentacin1" in
+  `ACAD_LAYOUT` and ezdxf could not reopen the file (9 of 266 drawings).
+  `dxf_add_text` copies the bytes for pre-r2007 DXF, as `dynapi_set_helper`
+  does.
+- **FIELDLIST without its fields.** Each 330 after the count was taken for
+  the owner, so `fields[]` stayed empty and ODA/AutoCAD refused the whole
+  DWG ("Object improperly read: AcDbFieldList"). Every drawing with fields.
+
+Branches `fix-dimension-subtype-groups`, `in_dxf-codepage-dictionary-keys`
+and `in_dxf-fieldlist-fields` in `~/Proyectos/externos/libredwg`, one fix
+each, for upstream PRs.
+
+Then proxy entities (Civil 3D, AutoCAD Architecture, MEP objects: 262 of
+the corpus drawings carry them, 152 645 proxies), appended as a second
+block of the same patch. Before it, saving any such drawing lost every
+proxy's graphics, and ODA/AutoCAD refused many of them outright
+("Object improperly read: <AcDbProxyEntity>, No ClassId"):
+
+- **Class number (`dwg.spec` ENCODER, `out_dxf.c`).** The DWG keeps the
+  application's class number in the proxy (`proxy_id`); the encoder wrote
+  the DXF 90 (always 498) there. And `dwg2dxf` numbered 91 by DWG class
+  index, which drifts from the CLASSES section once r2004+ skips
+  `ACDBPLACEHOLDER`/`LAYOUT`: `dxf_class_number` counts only the classes
+  actually emitted. PROXY_ENTITY/OBJECT now write 90 = 498/499 and that 91
+  in every version, as ODA does.
+- **Graphics in `AcDbProxyEntity` (`out_dxf.c`, `common_entity_data.spec`).**
+  They went out at `AcDbEntity` level (160 since r2010), where ezdxf keeps
+  them on reading but drops them on writing: the proxy came back empty
+  from IngeCAD's save. Now 92/310 inside the proxy subclass, once.
+- **92 of a proxy is its graphics (`in_dxf.c`).** The field matcher gave
+  it to `proxy_data_size` and ignored the 310s; it now goes to
+  `ent->preview` in every version.
+- **No second copy of the graphics in the DWG (`dwg.spec`).** The decoder
+  read `preview_size` bytes of `proxy_data` that the format does not have
+  (the graphics are the common entity preview), and the encoder wrote them
+  back as zeros — the application's data turned into zeros, doubled in size.
+
+- **The proxy's format version (group 95).** It packs the maintenance
+  release in the high word and the AcDbDwgVersion in the low one
+  (`0x7D001F` for r2013, what ODA writes); `dwg2dxf` wrote the saving
+  application's header byte shifted by 8, the spec and `in_dxf` unpacked it
+  the same wrong way, and a proxy saved as r2000 still claimed a newer
+  format — ODA refuses that whole file ("Out of range"; 28 of 213 drawings
+  after the fixes above). `dwg2dxf` now writes the source drawing's version
+  from `dwg_versions[]`, and the encoder clamps an object newer than the
+  target to the target's version.
+
+Measured: `make check` 270/0; `dwg2dxf` old vs new over the 262 proxy
+drawings: same entities in all, decoded proxy graphics equal in 243 and
+more in 10, fewer in none; letrina 0028: 128 graphic entities → ODA reads
+128 with no error → IngeCAD reopens 128.
+
+## Previous state — 2026-09-24: the 2026-08-13 stack + two EED fixes + annotative context data
 
 Same base and seventeen patches as below, plus two fixes to `add_eed` in
 `src/in_dxf.c`, appended to `current/ingecad-vendor-0.14.8580.patch` and

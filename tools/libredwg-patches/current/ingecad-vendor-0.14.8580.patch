@@ -1508,3 +1508,519 @@ index 1ef75a1c..cc1a329f 100644
    { "rect_height",	"BD", sizeof (BITCODE_BD),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, rect_height),
      0,0,0, 41 },
    { "rect_width",	"BD", sizeof (BITCODE_BD),  OFF (struct _dwg_object_MTEXTOBJECTCONTEXTDATA, rect_width),
+--- a/src/in_dxf.c	2026-09-24 10:35:10.929558218 -0500
++++ b/src/in_dxf.c	2026-09-27 00:58:03.231311668 -0500
+@@ -2414,6 +2414,20 @@
+     assert (o->array);                                                        \
+     assert (i >= 0 && i < (int)o->num_##array)
+ 
++/* A string from the DXF for a TV field. A pre-r2007 DXF is written in the
++   drawing's codepage, so its bytes are already what the DWG stores: copy
++   them, as dynapi_set_helper does. dwg_add_u8_input expects UTF-8 (what an
++   r2007+ DXF is) and drops every byte that is not, so a cp1252 "ó" (0xF3)
++   vanished from dictionary keys: the layout "Presentación1" came back as
++   "Presentacin1" in ACAD_LAYOUT, while its LAYOUT object kept the name. */
++static char *
++dxf_add_text (Dwg_Data *restrict dwg, const char *restrict str)
++{
++  if (dwg->header.from_version < R_2007)
++    return strdup (str);
++  return (char *)dwg_add_u8_input (dwg, str);
++}
++
+ static Dxf_Pair *
+ add_LTYPE_dashes (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
+                   Dxf_Pair *restrict pair)
+@@ -2509,7 +2523,7 @@
+           is_tu = obj->parent->header.version >= R_2007;
+           CHK_dashes (j, dashes);
+           o->dashes[j].text
+-              = dwg_add_u8_input (obj->parent, pair->value.s.ptr);
++              = dxf_add_text (obj->parent, pair->value.s.ptr);
+           LOG_TRACE ("LTYPE.dashes[%d].text = %s [T 9]\n", j,
+                      pair->value.s.ptr);
+           // write into strings_area
+@@ -6009,7 +6023,7 @@
+                 i = 3;
+               assert (i >= 0 && i <= 3);
+             }
+-          o->ref[i].classname = dwg_add_u8_input (dwg, pair->value.s.ptr);
++          o->ref[i].classname = dxf_add_text (dwg, pair->value.s.ptr);
+           LOG_TRACE ("%s.ref[%d].classname = %s [T %d]\n", obj->name, i,
+                      pair->value.s.ptr, pair->code);
+           have_rotated_type = 0;
+@@ -6147,7 +6161,7 @@
+         case 0:
+           break;
+         case 8:
+-          o->entries[i].name = dwg_add_u8_input (dwg, pair->value.s.ptr);
++          o->entries[i].name = dxf_add_text (dwg, pair->value.s.ptr);
+           LOG_TRACE ("%s.entries[%d].name = %s [T %d]\n", obj->name, i,
+                      pair->value.s.ptr, pair->code);
+           break;
+@@ -6228,7 +6242,7 @@
+                  pair->code);
+       break;
+     case DWG_VT_STRING:
+-      value->u.text = dwg_add_u8_input (dwg, pair->value.s.ptr);
++      value->u.text = dxf_add_text (dwg, pair->value.s.ptr);
+       LOG_TRACE ("%s.%s = %s [T %d]\n", "EvalVariant", "value",
+                  pair->value.s.ptr, pair->code);
+       break;
+@@ -6274,7 +6288,7 @@
+                  "VALUEPARAM", pair ? pair->code : -1, 1, "name");
+       return 0;
+     }
+-  value->name = dwg_add_u8_input (dwg, pair->value.s.ptr);
++  value->name = dxf_add_text (dwg, pair->value.s.ptr);
+   LOG_TRACE ("%s.%s = %s [BL %d]\n", "VALUEPARAM", "name", pair->value.s.ptr,
+              pair->code);
+   dxf_free_pair (pair);
+@@ -7828,7 +7842,7 @@
+       return;
+     }
+   _obj->itemhandles[num] = hdl;
+-  _obj->texts[num] = dwg_add_u8_input (dwg, text);
++  _obj->texts[num] = dxf_add_text (dwg, text);
+   LOG_TRACE ("%s.texts[%d] = %s [T* 3]\n", obj->name, num, text);
+   _obj->numitems = num + 1;
+ }
+@@ -10932,6 +10946,34 @@
+               LOG_TRACE ("%s.block_header = " FORMAT_REF " [H 330]\n",
+                          obj->name, ARGS_REF (o->block_header));
+             }
++          // FIELDLIST (AcDbIdSet): after its count (90), every 330 is one
++          // more field. Taken as the owner instead, each one overwrote the last
++          // and fields[] stayed empty, so the DWG claimed num_fields with no
++          // handles behind them and ODA/AutoCAD rejected the whole file
++          // ("Object improperly read: AcDbFieldList").
++          else if (pair->code == 330 && obj->fixedtype == DWG_TYPE_FIELDLIST
++                   && obj->tio.object->tio.FIELDLIST->num_fields)
++            {
++              Dwg_Object_FIELDLIST *o = obj->tio.object->tio.FIELDLIST;
++              BITCODE_BL nf = 0;
++              while (o->fields && nf < o->num_fields && o->fields[nf])
++                nf++;
++              if (!o->fields || nf >= o->num_fields)
++                {
++                  BITCODE_H *fields = (BITCODE_H *)realloc (
++                      o->fields, (nf + 1) * sizeof (BITCODE_H));
++                  if (!fields)
++                    {
++                      LOG_ERROR ("Out of memory");
++                      break;
++                    }
++                  o->fields = fields;
++                  o->num_fields = nf + 1;
++                }
++              o->fields[nf] = dwg_add_handleref (dwg, 4, pair->value.u, NULL);
++              LOG_TRACE ("FIELDLIST.fields[%u] = " FORMAT_REF " [H* 330]\n",
++                         nf, ARGS_REF (o->fields[nf]));
++            }
+           // valid ownerhandle, if not XRECORD with an ownerhandle already
+           else if (pair->code == 330
+                    && (obj->fixedtype != DWG_TYPE_XRECORD
+@@ -12030,7 +12072,7 @@
+                   if (tbl_sty && pair && pair->code == 300)
+                     {
+                       tbl_sty->name
+-                          = dwg_add_u8_input (dwg, pair->value.s.ptr);
++                          = dxf_add_text (dwg, pair->value.s.ptr);
+                       LOG_TRACE ("%s.%s.name = \"%s\" [BL %d]\n", obj->name,
+                                  key, pair->value.s.ptr, pair->code);
+                       dxf_free_pair (pair);
+@@ -12355,7 +12397,7 @@
+               if (!o->names || j < 0 || j >= (int)o->num_names)
+                 goto invalid_dxf;
+               assert (j >= 0 && j < (int)o->num_names && o->names);
+-              o->names[j] = dwg_add_u8_input (dwg, pair->value.s.ptr);
++              o->names[j] = dxf_add_text (dwg, pair->value.s.ptr);
+               LOG_TRACE ("%s.%s[%d] = %s [%s %d]\n", name, "names", j,
+                          pair->value.s.ptr, "T", pair->code);
+               j++;
+@@ -12853,7 +12895,7 @@
+                             {
+                               color.flag |= 0x10;
+                               color.name
+-                                  = dwg_add_u8_input (dwg, pair->value.s.ptr);
++                                  = dxf_add_text (dwg, pair->value.s.ptr);
+                               LOG_TRACE ("%s.%s.name = %s [%s %d]\n", name,
+                                          f->name, pair->value.s.ptr, "CMC",
+                                          pair->code);
+@@ -13187,7 +13229,7 @@
+                         {
+                           color.flag |= 0x10;
+                           color.name
+-                              = dwg_add_u8_input (dwg, pair->value.s.ptr);
++                              = dxf_add_text (dwg, pair->value.s.ptr);
+                           // TODO: book_name or name?
+                           LOG_TRACE ("COMMON.%s.name = %s [%s %d]\n", f->name,
+                                      pair->value.s.ptr, "CMC", pair->code);
+@@ -13428,7 +13470,7 @@
+                        && (pair->code == 2 || pair->code == 210
+                            || pair->code == 220 || pair->code == 230))
+                 ; // ignore the POLYLINE elevation.x,y. DXF artifacts
+-              else if (strEQc (name, "DIMENSION")
++              else if (memBEGINc (name, "DIMENSION")
+                        && (pair->code == 16 || pair->code == 26
+                            || pair->code == 36))
+                 ; // ignore arc definition point for subtypes without
+--- a/src/common_entity_data.spec
++++ b/src/common_entity_data.spec
+@@ -301,7 +301,12 @@
+   // p20.4.1
+   SINCE (R_13b1) {
+     FIELD_B (preview_exists, 0);
+-    if (_ent->preview_exists)
++    if (_ent->preview_exists
++#ifdef IS_DXF
++        // a proxy writes its graphics in AcDbProxyEntity
++        && obj->fixedtype != DWG_TYPE_PROXY_ENTITY
++#endif
++    )
+       {
+         // was DXF 160 (used for block previews?).
+         // 92 also for all PROXY vector preview data with klass->is_zombie
+--- a/src/dwg.spec
++++ b/src/dwg.spec
+@@ -5629,23 +5629,55 @@
+ 
+   //HANDLE_UNKNOWN_BITS;
+   SUBCLASS (AcDbProxyEntity)
+-  FIELD_BL (proxy_id, 90); // always 499
++  ENCODER {
++    // The DWG stores the application's class number here (ODA and AutoCAD
++    // write e.g. 518 for a proxy of class 518). A DXF gives it in 91
++    // (class_id), with 90 the constant 498; writing the 90 left ODA with
++    // "No ClassId" and the whole drawing unreadable.
++    if (_obj->class_id >= 500)
++      _obj->proxy_id = _obj->class_id;
++  }
+   DXF {
+-    PRE (R_2018) {
+-      FIELD_BL (class_id, 91);
+-    }
++    // 90 the proxy entity class, 91 the application's class as the
++    // CLASSES section numbers it (ODA writes both in every version)
++    VALUE_BL (498, 90);
++#ifdef IS_DXF
++    VALUE_BL (dxf_class_number (dat, dwg, _obj->proxy_id), 91);
++#endif
++  } else {
++    FIELD_BL (proxy_id, 90); // always 499
++  }
++  // The object's format: the maintenance release in the high word, the
++  // AcDbDwgVersion (0x17 r2000 ... 0x21 r2018) in the low word, as ODA reads
++  // and writes it (e.g. 0x7D001F for r2013).
++  ENCODER {
++    const Dwg_Versions *target = dwg_version_struct (dat->version);
++    if (_obj->version)
++      {
++        _obj->dwg_version = _obj->version & 0xffff;
++        _obj->maint_version = _obj->version >> 16;
++      }
++    // A drawing cannot hold an object in a newer format than its own: ODA
++    // refuses the whole file ("Out of range"), e.g. an r2013 proxy saved
++    // as r2000.
++    if (target && _obj->dwg_version > target->dwg_version)
++      {
++        _obj->dwg_version = target->dwg_version;
++        _obj->maint_version = target->maint_rel_version;
++        _obj->version = (_obj->maint_version << 16) | _obj->dwg_version;
++      }
+   }
+   PRE (R_2018) {
+     FIELD_BLx (version, 95);
+-    FIELD_VALUE (maint_version) = FIELD_VALUE(version) >> 8;
+-    FIELD_VALUE (dwg_version) = FIELD_VALUE(version) & 0xff;
++    FIELD_VALUE (maint_version) = FIELD_VALUE(version) >> 16;
++    FIELD_VALUE (dwg_version) = FIELD_VALUE(version) & 0xffff;
+     LOG_TRACE ("> maint_version: %x\n", _obj->maint_version);
+     LOG_TRACE ("> dwg_version: %x\n", _obj->dwg_version);
+   }
+   SINCE (R_2018) {
+     FIELD_BLx (dwg_version, 0);
+     FIELD_BLx (maint_version, 0);
+-    FIELD_VALUE (version) = (FIELD_VALUE(maint_version) << 8) + FIELD_VALUE(dwg_version);
++    FIELD_VALUE (version) = (FIELD_VALUE(maint_version) << 16) + FIELD_VALUE(dwg_version);
+     DXF {
+       FIELD_BLx (version, 95);
+     }
+@@ -5654,14 +5686,20 @@
+     FIELD_B (from_dxf, 70); // Original Data Format: 0 dwg, 1 dxf
+   }
+ 
+-  // proxy_data_size is _ent->preview_size. see par 29
+-  DXF_OR_PRINT {
+-    // preview 92/310 is also proxy data
+-    FIELD_BL (proxy_data_size, 92)
+-  } else {
+-    FIELD_VALUE (proxy_data_size) = _ent->preview_size;
++  // The graphics are the common entity preview; the DWG has no second copy
++  // of them here (par 20.4.91, and AutoCAD's and ODA's files). Reading one
++  // took preview_size bytes of the application's data, and failed on a
++  // proxy whose data is shorter than its graphics.
++  DXF {
++    if (_ent->preview_exists && _ent->preview_size && _ent->preview)
++      {
++        VALUE_BL ((BITCODE_BL)_ent->preview_size, 92);
++        VALUE_BINARY (_ent->preview, (size_t)_ent->preview_size, 310);
++      }
++  }
++  FREE {
++    FIELD_TF (proxy_data, _obj->proxy_data_size, 0);
+   }
+-  FIELD_TF (proxy_data, _obj->proxy_data_size, 310);
+ 
+   DECODER {
+     _obj->data_numbits = (obj->hdlpos - bit_position (dat)) & 0xFFFFFFFF;
+@@ -5760,23 +5798,52 @@
+     SUBCLASS (AcDbProxyObject)
+   }
+ #endif
+-  FIELD_BL (proxy_id, 90); // always 499
++  ENCODER {
++    // as for PROXY_ENTITY: the DWG holds the application's class number
++    if (_obj->class_id >= 500)
++      _obj->proxy_id = _obj->class_id;
++  }
+   DXF {
+-    PRE (R_2018) {
+-      FIELD_BL (class_id, 91);
+-    }
++    // 90 the proxy object class, 91 the application's class as the
++    // CLASSES section numbers it (ODA writes both in every version)
++    VALUE_BL (499, 90);
++#ifdef IS_DXF
++    VALUE_BL (dxf_class_number (dat, dwg, _obj->proxy_id), 91);
++#endif
++  } else {
++    FIELD_BL (proxy_id, 90); // always 499
++  }
++  // The object's format: the maintenance release in the high word, the
++  // AcDbDwgVersion (0x17 r2000 ... 0x21 r2018) in the low word, as ODA reads
++  // and writes it (e.g. 0x7D001F for r2013).
++  ENCODER {
++    const Dwg_Versions *target = dwg_version_struct (dat->version);
++    if (_obj->version)
++      {
++        _obj->dwg_version = _obj->version & 0xffff;
++        _obj->maint_version = _obj->version >> 16;
++      }
++    // A drawing cannot hold an object in a newer format than its own: ODA
++    // refuses the whole file ("Out of range"), e.g. an r2013 proxy saved
++    // as r2000.
++    if (target && _obj->dwg_version > target->dwg_version)
++      {
++        _obj->dwg_version = target->dwg_version;
++        _obj->maint_version = target->maint_rel_version;
++        _obj->version = (_obj->maint_version << 16) | _obj->dwg_version;
++      }
+   }
+   PRE (R_2018) {
+     FIELD_BLx (version, 95);
+-    FIELD_VALUE (maint_version) = FIELD_VALUE(version) >> 8;
+-    FIELD_VALUE (dwg_version) = FIELD_VALUE(version) & 0xff;
++    FIELD_VALUE (maint_version) = FIELD_VALUE(version) >> 16;
++    FIELD_VALUE (dwg_version) = FIELD_VALUE(version) & 0xffff;
+     LOG_TRACE ("> maint_version: %x\n", _obj->maint_version);
+     LOG_TRACE ("> dwg_version: %x\n", _obj->dwg_version);
+   }
+   SINCE (R_2018) {
+     FIELD_BLx (dwg_version, 0);
+     FIELD_BLx (maint_version, 0);
+-    FIELD_VALUE (version) = (FIELD_VALUE(maint_version) << 8) + FIELD_VALUE(dwg_version);
++    FIELD_VALUE (version) = (FIELD_VALUE(maint_version) << 16) + FIELD_VALUE(dwg_version);
+     DXF {
+       FIELD_BLx (version, 95);
+     }
+--- a/src/in_dxf.c
++++ b/src/in_dxf.c
+@@ -12679,8 +12679,13 @@
+                         }
+                       // exceptions, where there's another field 92:
+                       if (pair->code == 92 && is_entity
+-                          && dwg->header.from_version < R_2010
+-                          && strEQc (subclass, "AcDbEntity"))
++                          && ((dwg->header.from_version < R_2010
++                               && strEQc (subclass, "AcDbEntity"))
++                              // a proxy's graphics, in every version. Else
++                              // proxy_data_size takes the 92, its 310s are
++                              // ignored and the proxy is saved empty.
++                              || (obj->fixedtype == DWG_TYPE_PROXY_ENTITY
++                                  && strEQc (subclass, "AcDbProxyEntity"))))
+                         // not MULTILEADER.text_color, nor MESH.num_vertex
+                         {
+                           pair = add_ent_preview (obj, dat, pair);
+@@ -13526,8 +13531,10 @@
+                     o->data_size = pair->value.i;
+                   else if (pair->code == 95)
+                     {
+-                      o->dwg_version = pair->value.u >> 16;
+-                      o->maint_version = pair->value.u & 0xff;
++                      // maintenance release high, dwg version low
++                      o->version = pair->value.u;
++                      o->dwg_version = pair->value.u & 0xffff;
++                      o->maint_version = pair->value.u >> 16;
+                     }
+                   else if (pair->code == 70)
+                     o->from_dxf = pair->value.i;
+@@ -13572,8 +13579,10 @@
+                     o->data_size = pair->value.i;
+                   else if (pair->code == 95)
+                     {
+-                      o->dwg_version = pair->value.u >> 16;
+-                      o->maint_version = pair->value.u & 0xff;
++                      // maintenance release high, dwg version low
++                      o->version = pair->value.u;
++                      o->dwg_version = pair->value.u & 0xffff;
++                      o->maint_version = pair->value.u >> 16;
+                     }
+                   else if (pair->code == 70)
+                     o->from_dxf = pair->value.i;
+--- a/src/out_dxf.c
++++ b/src/out_dxf.c
+@@ -2005,6 +2005,34 @@
+ 
+ #ifndef DISABLE_DXF
+ 
++/* Whether dxf_classes_write leaves this class out of the CLASSES section:
++   since r2004 ACDBPLACEHOLDER and LAYOUT are builtin. */
++static bool
++dxf_class_skipped (const Bit_Chain *restrict dat,
++                   const Dwg_Class *restrict klass)
++{
++  return !klass->dxfname
++         || (dat->version >= R_2004
++             && (strEQc (klass->dxfname, "ACDBPLACEHOLDER")
++                 || strEQc (klass->dxfname, "LAYOUT")));
++}
++
++/* A class's number as the DXF numbers it: 500 plus its position among the
++   classes dxf_classes_write actually emits. The DWG number (obj->type)
++   counts the skipped ones too, so after them the two drift apart and a
++   proxy's class id pointed at another class (ODA: "No ClassId"). */
++static BITCODE_BL
++dxf_class_number (const Bit_Chain *restrict dat, const Dwg_Data *restrict dwg,
++                  BITCODE_BL type)
++{
++  BITCODE_BL number = 500;
++  BITCODE_BS j;
++  for (j = 0; j < dwg->num_classes && (BITCODE_BL)j + 500 < type; j++)
++    if (!dxf_class_skipped (dat, &dwg->dwg_class[j]))
++      number++;
++  return number;
++}
++
+ #  include "dwg.spec"
+ #  include "dwg2.spec"
+ 
+@@ -2822,13 +2850,30 @@
+         dxf_fixup_zero_handle (obj);
+       fprintf (dat->fh, "%3i\r\n" FMT_H "\r\n", 5, obj->handle.value);
+     }
+-  error |= dxf_common_entity_handle_data (dat, (Dwg_Object *)obj);
++  {
++    // The graphics belong in AcDbProxyEntity (92/310), where the DXF
++    // reference puts them and where ezdxf and ODA read a proxy's graphics.
++    // Left to the common entity writer they went out at AcDbEntity level
++    // (160 since r2010) unless the class is a zombie, and a reader that
++    // rewrites the drawing (ezdxf) dropped them: the proxy came back empty.
++    Dwg_Object_Entity *ent = (Dwg_Object_Entity *)_ent;
++    BITCODE_B had_preview = ent->preview_exists;
++    ent->preview_exists = 0;
++    error |= dxf_common_entity_handle_data (dat, (Dwg_Object *)obj);
++    ent->preview_exists = had_preview;
++  }
+   VALUE_TFF ("AcDbProxyEntity", 100);
+   VALUE_BL (498, 90); // proxy entity class id
+-  VALUE_BL (obj->type, 91); // application entity's class id
++  // application entity's class id, as the CLASSES section numbers it
++  VALUE_BL (dxf_class_number (dat, dwg, obj->type), 91);
+   {
+-    BITCODE_BL version = ((BITCODE_BL)dwg->header.maint_version << 8)
+-                         | dwg->header.dwg_version;
++    // the object is in the source drawing's format: its maintenance
++    // release in the high word, its AcDbDwgVersion in the low one. (The
++    // header's dwg_version byte is the saving application's, not this.)
++    const Dwg_Versions *fmt = dwg_version_struct (dwg->header.from_version);
++    BITCODE_BL version
++        = fmt ? ((BITCODE_BL)fmt->maint_rel_version << 16) | fmt->dwg_version
++              : 0;
+     fprintf (dat->fh, " 95\r\n%u\r\n", (unsigned)version);
+   }
+   if (dat->version >= R_2000)
+@@ -2836,7 +2881,7 @@
+   // The graphics blob goes in the proxy-data group (92 size + 310 hex);
+   // our own in_dxf reads it back via add_ent_preview, so the DXF still
+   // round-trips through dxf2dwg. Viewers (ezdxf, ODA) draw it.
+-  if (_ent->preview_is_proxy && _ent->preview_size && _ent->preview)
++  if (_ent->preview_exists && _ent->preview_size && _ent->preview)
+     {
+       VALUE_BL ((BITCODE_BL)_ent->preview_size, 92);
+       VALUE_BINARY (_ent->preview, (size_t)_ent->preview_size, 310);
+@@ -3508,12 +3553,8 @@
+   for (j = 0; j < dwg->num_classes; j++)
+     {
+       const char *dxfname = dwg->dwg_class[j].dxfname;
+-      if (!dxfname)
+-        continue;
+       // some classes are now builtin
+-      if (dat->version >= R_2004
+-          && (strEQc (dxfname, "ACDBPLACEHOLDER")
+-              || strEQc (dxfname, "LAYOUT")))
++      if (dxf_class_skipped (dat, &dwg->dwg_class[j]))
+         continue;
+       if (strEQc (dxfname, "DATATABLE"))
+         dxfname = "ACDBDATATABLE";
+--- a/src/out_dxfb.c
++++ b/src/out_dxfb.c
+@@ -1434,6 +1434,34 @@
+ 
+ #ifndef DISABLE_DXF
+ 
++/* Whether dxfb_classes_write leaves this class out of the CLASSES section:
++   since r2004 ACDBPLACEHOLDER and LAYOUT are builtin. */
++static bool
++dxf_class_skipped (const Bit_Chain *restrict dat,
++                   const Dwg_Class *restrict klass)
++{
++  return !klass->dxfname
++         || (dat->version >= R_2004
++             && (strEQc (klass->dxfname, "ACDBPLACEHOLDER")
++                 || strEQc (klass->dxfname, "LAYOUT")));
++}
++
++/* A class's number as the DXF numbers it: 500 plus its position among the
++   classes dxfb_classes_write actually emits. The DWG number (obj->type)
++   counts the skipped ones too, so after them the two drift apart and a
++   proxy's class id pointed at another class (ODA: "No ClassId"). */
++static BITCODE_BL
++dxf_class_number (const Bit_Chain *restrict dat, const Dwg_Data *restrict dwg,
++                  BITCODE_BL type)
++{
++  BITCODE_BL number = 500;
++  BITCODE_BS j;
++  for (j = 0; j < dwg->num_classes && (BITCODE_BL)j + 500 < type; j++)
++    if (!dxf_class_skipped (dat, &dwg->dwg_class[j]))
++      number++;
++  return number;
++}
++
+ #  include "dwg.spec"
+ #  include "dwg2.spec"
+ 
+@@ -1975,12 +2003,8 @@
+   for (j = 0; j < dwg->num_classes; j++)
+     {
+       const char *dxfname = dwg->dwg_class[j].dxfname;
+-      if (!dxfname)
+-        continue;
+       // some classes are now builtin
+-      if (dat->version >= R_2004
+-          && (strEQc (dxfname, "ACDBPLACEHOLDER")
+-              || strEQc (dxfname, "LAYOUT")))
++      if (dxf_class_skipped (dat, &dwg->dwg_class[j]))
+         continue;
+       if (strEQc (dxfname, "DATATABLE"))
+         dxfname = "ACDBDATATABLE";
