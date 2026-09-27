@@ -157,8 +157,19 @@ def starter_pgp() -> str:
 
 
 def load_aliases(pgp_path: Path | None = None) -> dict[str, str]:
-    """Stock aliases overlaid with the user's PGP file, if present."""
+    """Stock aliases, then the site's acad.pgp (core.site), then the user's
+    -- each overriding the one before."""
     aliases = dict(DEFAULT_ALIASES)
+    if pgp_path is None:
+        # a classroom's or an office's acad.pgp, under the user's own
+        from core import site
+
+        shared = site.site_pgp()
+        if shared is not None:
+            try:
+                aliases.update(parse_pgp(read_pgp(shared)))
+            except OSError:
+                pass
     path = pgp_path or user_pgp_path()
     try:
         aliases.update(parse_pgp(read_pgp(path)))

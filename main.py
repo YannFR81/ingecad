@@ -127,6 +127,13 @@ def _self_check() -> int:
     print(f"IngeCAD {__version__}")
     print(f"  packaged   : {'yes' if is_frozen() else 'no (running from the repo)'}")
     print(f"  app root   : {root}")
+    from core import site
+    folder = site.site_dir()
+    if folder is None:
+        print(f"  site folder: none ({', '.join(str(d) for d in site.site_dirs())})")
+    else:
+        files = [n for n in (site.DEFAULTS, site.PGP) if (folder / n).is_file()]
+        print(f"  site folder: {folder}  ({', '.join(files) or 'empty'})")
     for label, found in converters_status():
         print(f"  {label:16}: {found or 'not found'}")
 
@@ -219,6 +226,10 @@ def main() -> int:
     # silently ignored. These two setters are static for exactly this case.
     QCoreApplication.setApplicationName("IngeCAD")
     QCoreApplication.setOrganizationName("IngeCAD")
+    # A classroom's or an office's defaults (/etc/ingecad), under the
+    # user's own settings -- also before the first read.
+    from core import site
+    site.install_defaults("IngeCAD", "IngeCAD")
     _configure_surface_format()
     app = QApplication(sys.argv)
     # A driver that cannot serve the format we just asked for takes the

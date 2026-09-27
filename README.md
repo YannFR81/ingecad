@@ -218,6 +218,45 @@ IngeCAD-*/ingecad
 `--check` prints where the app found its shaders, translations and converters,
 and exits non-zero if any of them is missing.
 
+## Classroom and office defaults
+
+To give every account on a machine the same starting setup -- a class, an
+office -- put a folder at `/etc/ingecad/` (or point `INGECAD_SITE_DIR` at
+one). It plays the part of an AutoCAD deployment's shared support folder and
+profile, and each user's own choices still win over it:
+
+```
+/etc/ingecad/
+├── defaults.ini    default value of any setting
+└── acad.pgp        aliases, under each user's own acad.pgp
+```
+
+A secondary-school class: Spanish interface, right-click = Enter, and the
+survey plugins switched off:
+
+```ini
+; /etc/ingecad/defaults.ini
+language=es
+
+[input]
+right_click=enter
+
+[plugins]
+topografia\enabled=false
+terreno\enabled=false
+
+[autosave]
+savetime=5
+```
+
+`acad.pgp` there uses AutoCAD's syntax; a Spanish AutoCAD's file works as it
+is. `ingecad --check` shows whether the folder was found. With the Flatpak,
+let the app read the host's `/etc` once, as root:
+
+```bash
+sudo flatpak override --system --filesystem=host-etc:ro org.ingecad.IngeCAD
+```
+
 ## Running from source
 
 ```bash
