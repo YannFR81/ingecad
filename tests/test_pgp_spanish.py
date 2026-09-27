@@ -103,8 +103,49 @@ def test_edit_program_parameters_creates_the_file_and_reinit_reads_it(
         pgp_path.write_bytes(pgp_path.read_bytes()
                              + "DE, *DESPLAZA\n".encode("cp1252"))
         assert win.dispatcher.resolve_name("DE") != "MOVE"
+        # REINIT shows the Re-initialization dialog; the user ticks
+        # PGP File and presses OK
+        import views.reinit_dialog as reinit_mod
+        from PySide6.QtCore import QTimer
+
+        class Ticking(reinit_mod.ReinitDialog):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.pgp.setChecked(True)
+                QTimer.singleShot(0, self.accept)
+
+        monkeypatch.setattr(reinit_mod, "ReinitDialog", Ticking)
         win.dispatcher.submit("REINIT")
         assert win.dispatcher.resolve_name("DE") == "MOVE"
+    finally:
+        win.document.dirty = False
+        win.close()
+
+
+def test_reinit_without_pgp_file_ticked_changes_nothing(qapp, tmp_path,
+                                                         monkeypatch):
+    from PySide6.QtCore import QTimer
+
+    import views.reinit_dialog as reinit_mod
+    from views.main_window import MainWindow
+
+    pgp_path = tmp_path / "acad.pgp"
+    pgp_path.write_text("DE, *DESPLAZA\n", encoding="utf-8")
+    monkeypatch.setattr(aliases_mod, "user_pgp_path", lambda: pgp_path)
+
+    class Accepting(reinit_mod.ReinitDialog):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            assert not self.pgp.isChecked()        # AutoCAD: unticked
+            QTimer.singleShot(0, self.accept)
+
+    monkeypatch.setattr(reinit_mod, "ReinitDialog", Accepting)
+    win = MainWindow()
+    win.new_document()
+    try:
+        win.dispatcher.aliases = {}
+        win.dispatcher.submit("REINIT")
+        assert win.dispatcher.aliases == {}
     finally:
         win.document.dirty = False
         win.close()

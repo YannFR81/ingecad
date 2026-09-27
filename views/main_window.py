@@ -4239,7 +4239,15 @@ class MainWindow(QMainWindow):
                "changes.", path=str(path)))
 
     def _cmd_reinit(self, *args) -> None:
-        """REINIT: read acad.pgp again, so edited aliases work at once."""
+        """REINIT: the Re-initialization dialog; with PGP File ticked,
+        acad.pgp is read again so edited aliases work at once."""
+        from views.reinit_dialog import ReinitDialog
+
+        dialog = ReinitDialog(self)
+        if dialog.exec() and dialog.pgp.isChecked():
+            self._reload_pgp()
+
+    def _reload_pgp(self) -> None:
         from core import aliases as aliases_mod
 
         self.dispatcher.aliases = aliases_mod.load_aliases()
