@@ -30,6 +30,39 @@ def apply() -> None:
     _patch_radial_dimension_layout()
     _patch_linear_dimension_direction()
     _patch_dxfreplace_mixed_surrogates()
+    _patch_single_vertex_leader()
+
+
+def _patch_single_vertex_leader() -> None:
+    """A LEADER with a single vertex is written and kept, not dropped.
+
+    ezdxf 1.4 requires two vertices: ``Leader.preprocess_export`` skips a
+    LEADER with fewer, and ``Leader.audit`` (run by ``recover.readfile``)
+    deletes it. Real drawings carry them — all 73 leaders of a road plan in
+    the corpus have one vertex, and ODA File Converter reads them as such —
+    so Save as DWG and Save as DXF silently lost every one. With the patch
+    only a LEADER without any vertex is refused. Drop it if ezdxf accepts a
+    single vertex.
+    """
+    from ezdxf.entities.dxfgfx import DXFGraphic
+    from ezdxf.entities.leader import Leader
+
+    if getattr(Leader.preprocess_export, "_ingecad_patch", False):
+        return
+    original_audit = Leader.audit
+
+    def preprocess_export(self, tagwriter) -> bool:
+        return len(self.vertices) >= 1
+
+    def audit(self, auditor) -> None:
+        if len(self.vertices) >= 1:
+            DXFGraphic.audit(self, auditor)   # everything but the count
+        else:
+            original_audit(self, auditor)
+
+    preprocess_export._ingecad_patch = True
+    Leader.preprocess_export = preprocess_export
+    Leader.audit = audit
 
 
 def _dxf_backslash_replace(exc):
