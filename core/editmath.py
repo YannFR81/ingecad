@@ -38,39 +38,80 @@ def line_line_intersection(s1: Seg, s2: Seg, infinite2: bool = False):
     return t, (x1 + t * (x2 - x1), y1 + t * (y2 - y1))
 
 
+#: Tangency tolerance, relative to the size of the numbers involved. A
+#: tangent computed by the drawing lands within rounding of the circle
+#: (1e-14 in Rafael's drawing), which a strict test reads as "misses" or
+#: "crosses twice at the same point" — and TRIM then finds nothing to cut
+#: (#14). Relative, because at UTM coordinates (1e7) doubles carry ~1e-9
+#: of rounding: 1e-12 of the scale is ~1e-5 there and ~1e-10 near origin.
+TANGENT_TOL = 1e-12
+
+
+def _scale(*values: float) -> float:
+    return max(1.0, *(abs(v) for v in values))
+
+
 def circle_circle_intersections(c1: Point, r1: float,
                                 c2: Point, r2: float) -> list[Point]:
-    """Intersection points of two circles (0, 1 or 2)."""
+    """Intersection points of two circles (0, 1 or 2); a tangency is one."""
     dx, dy = c2[0] - c1[0], c2[1] - c1[1]
     d = math.hypot(dx, dy)
-    if d < EPS or d > r1 + r2 + EPS or d < abs(r1 - r2) - EPS:
+    tol = TANGENT_TOL * _scale(c1[0], c1[1], c2[0], c2[1], r1, r2)
+    if d < tol or d > r1 + r2 + tol or d < abs(r1 - r2) - tol:
         return []
     a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d)
-    h2 = r1 * r1 - a * a
-    h = math.sqrt(max(0.0, h2))
+    h = math.sqrt(max(0.0, r1 * r1 - a * a))
     mx = c1[0] + a * dx / d
     my = c1[1] + a * dy / d
-    if h < EPS:
+    if h <= tol or abs(d - (r1 + r2)) <= tol or abs(d - abs(r1 - r2)) <= tol:
         return [(mx, my)]
     ox, oy = -dy / d * h, dx / d * h
     return [(mx + ox, my + oy), (mx - ox, my - oy)]
 
 
 def line_circle_intersections(seg: Seg, center: Point, r: float):
-    """Params t (may be outside [0,1]) where the segment's line meets circle."""
+    """Params t (may be outside [0,1]) where the segment's line meets circle.
+
+    Measured from the foot of the perpendicular rather than through the
+    quadratic's discriminant: at a tangency the discriminant is a difference
+    of two large, nearly equal numbers and its sign is noise. A line within
+    TANGENT_TOL of the circle touches it once.
+    """
     x1, y1, x2, y2 = seg
     dx, dy = x2 - x1, y2 - y1
-    fx, fy = x1 - center[0], y1 - center[1]
     a = dx * dx + dy * dy
     if a < EPS:
         return []
-    b = 2 * (fx * dx + fy * dy)
-    c = fx * fx + fy * fy - r * r
-    disc = b * b - 4 * a * c
-    if disc < 0:
+    t_foot = ((center[0] - x1) * dx + (center[1] - y1) * dy) / a
+    fx = x1 + t_foot * dx - center[0]
+    fy = y1 + t_foot * dy - center[1]
+    d = math.hypot(fx, fy)
+    tol = TANGENT_TOL * _scale(center[0], center[1], r, x1, y1, x2, y2)
+    if d > r + tol:
         return []
-    sq = math.sqrt(disc)
-    return [(-b - sq) / (2 * a), (-b + sq) / (2 * a)]
+    if d >= r - tol:
+        # Along the line a tangency is ill-conditioned: 1e-14 of radial
+        # rounding moves the foot ~1e-7, enough to fall just past the end
+        # of a line drawn TO the tangent point. An end that lies on the
+        # circle IS that point (a tangent touches once) — use it exactly.
+        for t_end, (ex, ey) in ((0.0, (x1, y1)), (1.0, (x2, y2))):
+            if abs(math.hypot(ex - center[0], ey - center[1]) - r) <= tol:
+                return [t_end]
+        return [t_foot]
+    half = math.sqrt(r * r - d * d) / math.sqrt(a)
+    return [t_foot - half, t_foot + half]
+
+
+def _unique_angles(angles: list[float], tol: float = 1e-9) -> list[float]:
+    """Sorted angles in [0, 2pi) with near-duplicates merged, 0/2pi included."""
+    out: list[float] = []
+    for angle in sorted(a % math.tau for a in angles):
+        if out and angle - out[-1] <= tol:
+            continue
+        out.append(angle)
+    if len(out) > 1 and out[0] + math.tau - out[-1] <= tol:
+        out.pop()
+    return out
 
 
 # Edge circles are (center, r) full circles or (center, r, a0, a1) arcs
@@ -87,7 +128,9 @@ def _on_arc(center: Point, a0: float, a1: float, x: float, y: float) -> bool:
     if span >= math.tau - EPS:
         return True
     ang = math.atan2(y - center[1], x - center[0]) % math.tau
-    return (ang - a0) % math.tau <= span + 1e-9
+    rel = (ang - a0) % math.tau
+    # a point AT the start angle may come back as 2pi minus a hair
+    return rel <= span + 1e-9 or rel >= math.tau - 1e-9
 
 
 # -- TRIM ----------------------------------------------------------------------
@@ -160,8 +203,8 @@ def trim_circle(center: Point, r: float, cutters: list[Seg],
     two-intersecting-circles trim). Returns (start_angle, end_angle) in
     degrees ccw, or None if fewer than two crossings exist.
     """
-    angles = _circle_crossing_angles(center, r, cutters, cutter_circles or [])
-    angles = sorted(set(angles))
+    angles = _unique_angles(
+        _circle_crossing_angles(center, r, cutters, cutter_circles or []))
     if len(angles) < 2:
         return None
     a = pick_angle % math.tau
@@ -186,7 +229,7 @@ def trim_arc(center: Point, r: float, a_start: float, a_end: float,
         rel = (ang - s) % math.tau
         if EPS < rel < sweep - EPS:
             cuts.append(rel)
-    cuts = sorted(set(cuts))
+    cuts = _unique_angles(cuts)
     if not cuts:
         return None
     pick_rel = (pick_angle - s) % math.tau
