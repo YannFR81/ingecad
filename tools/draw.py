@@ -215,12 +215,16 @@ class CircleTool(Tool):
     #: Set by Draw > Circle > Center, Diameter: after the centre, ask the
     #: diameter instead of the radius.
     diameter_after_center = False
+    #: Set by Draw > Circle > Tan, Tan, Tan: 3P with a tangent snap on
+    #: every point, as AutoCAD's menu macro does.
+    tan_each_point = False
 
     def start(self) -> None:
         self.name = "CIRCLE"
         self._mode = "CR"
         self._pts: list[Point] = []
         self._tangents: list = []      # TTR: [(object, pick_point), ...]
+        self._items: list = []         # 3P: [(point or object, pick), ...]
         self.prompt("Specify center point for circle or [3P/2P/Ttr (tan tan radius)]:")
 
     def _radius_prompt(self) -> None:
@@ -256,11 +260,12 @@ class CircleTool(Tool):
                 self.prompt("Specify point on object for first tangent of circle:")
                 return True
             if t == "TTT":
-                # Draw > Circle > Tan, Tan, Tan (AutoCAD runs 3P with a
-                # tangent snap on each point): three tangent objects.
-                self._mode = "TTT"
-                self.entity_picker = True
-                self.prompt("Specify point on object for first tangent of circle:")
+                # Draw > Circle > Tan, Tan, Tan is AutoCAD's macro
+                # "_circle _3p _tan \_tan \_tan \": 3P, TAN on each point.
+                self._mode = "3P"
+                self.tan_each_point = True
+                self.prompt("Specify first point on circle:")
+                self._ask_tangent()
                 return True
         if self._mode == "CR" and self._pts:
             if t in ("D", "DIAMETER"):
@@ -330,24 +335,6 @@ class CircleTool(Tool):
         self._make(center, radius)
 
     def on_point(self, point: Point) -> None:
-        if self._mode == "TTT":
-            obj = self._pick_tangent_object(point)
-            if obj is None:
-                return
-            self._tangents.append((obj, point))
-            if len(self._tangents) == 1:
-                self.prompt("Specify point on object for second tangent of circle:")
-            elif len(self._tangents) == 2:
-                self.prompt("Specify point on object for third tangent of circle:")
-            else:
-                try:
-                    center, radius = actions.ttt_circle(self._tangents)
-                except ValueError:
-                    self.ctx.echo(tr("Circle does not exist."))
-                    self.ctx.finish()
-                    return
-                self._make(center, radius)
-            return
         if self._mode == "TTR":
             obj = self._pick_tangent_object(point)
             if obj is None:
@@ -387,18 +374,56 @@ class CircleTool(Tool):
                 center, radius = actions.circle_from_2p(*self._pts)
                 self._make(center, radius)
         else:  # 3P
-            if len(self._pts) < 3:
-                self.prompt("Specify second point on circle:"
-                            if len(self._pts) == 1
-                            else "Specify third point on circle:")
+            self._items.append((("point", point), point))
+            self._next_3p()
+
+    # -- 3P with tangent points (Tan, Tan, Tan) ---------------------------
+    def on_tangent_pick(self, point: Point) -> None:
+        """A 3P point picked with the Tangent snap: the object, not a point
+        on it -- the circle is solved when all three are known."""
+        if self._mode != "3P":
+            self.on_point(point)
+            return
+        obj = self._pick_tangent_object(point)
+        if obj is None:
+            self._ask_tangent()
+            return
+        self._items.append((obj, point))
+        self._next_3p()
+
+    def on_deferred_tangent(self, circle, pick: Point) -> None:
+        if self._mode != "3P":
+            self.on_point(pick)
+            return
+        self._items.append((("circle", circle[:2], circle[2]), pick))
+        self._next_3p()
+
+    def _ask_tangent(self) -> None:
+        if self.tan_each_point:
+            request = getattr(self.ctx.services, "set_osnap_override", None)
+            if request is not None:
+                request({"TAN"})
+
+    def _next_3p(self) -> None:
+        items = self._items
+        if len(items) < 3:
+            self.prompt("Specify second point on circle:" if len(items) == 1
+                        else "Specify third point on circle:")
+            self._ask_tangent()
+            return
+        try:
+            if all(obj[0] == "point" for obj, _pick in items):
+                center, radius = actions.circle_from_3p(
+                    *(obj[1] for obj, _pick in items))
             else:
-                try:
-                    center, radius = actions.circle_from_3p(*self._pts)
-                except ValueError:
-                    self.ctx.echo(tr("Collinear points — no circle."))
-                    self.ctx.finish()
-                else:
-                    self._make(center, radius)
+                center, radius = actions.ttt_circle(items)
+        except ValueError:
+            self.ctx.echo(tr("Collinear points — no circle.")
+                          if all(o[0] == "point" for o, _p in items)
+                          else tr("Circle does not exist."))
+            self.ctx.finish()
+            return
+        self._make(center, radius)
 
     def preview_segments(self, cursor: Point):
         if self._mode == "CR" and self._pts:
@@ -410,7 +435,8 @@ class CircleTool(Tool):
         if self._mode == "2P" and self._pts:
             center, r = actions.circle_from_2p(self._pts[0], cursor)
             return _circle_preview(center, r)
-        if self._mode == "3P" and len(self._pts) == 2:
+        if (self._mode == "3P" and len(self._items) == 2
+                and all(o[0] == "point" for o, _p in self._items)):
             try:
                 center, r = actions.circle_from_3p(self._pts[0], self._pts[1], cursor)
             except ValueError:

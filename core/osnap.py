@@ -122,3 +122,24 @@ def override_from_text(text: str):
         if word.startswith(key) and full.startswith(word):
             return frozenset({key})
     return None
+
+
+#: The word AutoCAD prompts after a one-shot snap: "of" for a point that
+#: belongs to the object (_endp of), "to" for one reached toward it (_tan to).
+_TO = frozenset({"PER", "TAN", "NEA", "PAR"})
+
+#: The command form a menu or a macro echoes (_endp, _tan...).
+_COMMAND_FORM = {
+    "END": "_endp", "MID": "_mid", "CEN": "_cen", "GCE": "_gcen",
+    "NOD": "_nod", "ORI": "_ori", "QUA": "_qua", "INT": "_int",
+    "EXT": "_ext", "INS": "_ins", "PER": "_per", "TAN": "_tan",
+    "NEA": "_nea", "APP": "_app", "PAR": "_par",
+}
+
+
+def preposition(key: str) -> str:
+    return "to" if key in _TO else "of"
+
+
+def command_form(key: str) -> str:
+    return _COMMAND_FORM.get(key, "_" + key.lower())

@@ -257,3 +257,46 @@ def test_circle_center_diameter_from_the_draw_menu(qapp):
         tools.cancel()
         win.document.dirty = False
         win.close()
+
+
+def test_circle_3p_with_typed_tangents_is_tan_tan_tan(qapp):
+    """What an AutoCAD user types: C, 3P, then TAN before each pick."""
+    import pytest
+
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    msp = win.document.modelspace()
+    for a, b in (((0, 0), (30, 0)), ((30, 0), (0, 40)), ((0, 40), (0, 0))):
+        msp.add_line(a, b)
+    win.tools._invalidate_geometry()
+    tools = win.tools
+    prompts = []
+    real = tools._on_prompt
+    tools._on_prompt = lambda text: (prompts.append(text), real(text))
+    try:
+        win._on_command_submitted("CIRCLE")
+        win._on_command_submitted("3P")
+        for pick in ((12, 0), (15, 20), (0, 12)):
+            win._on_command_submitted("TAN")
+            assert prompts[-1] == "to"                 # AutoCAD's answer
+            tools.on_click(*pick)
+        c = next(e for e in msp if e.dxftype() == "CIRCLE")
+        assert (c.dxf.center.x, c.dxf.center.y) == pytest.approx((10, 10))
+        assert c.dxf.radius == pytest.approx(10)
+        # the menu entry runs the same macro, prompting "_tan to"
+        prompts.clear()
+        bar_actions = win._menu_bar.actions()
+        draw = next(a for a in bar_actions
+                    if a.text().replace("&", "") == "Draw").menu()
+        draw_actions = draw.actions()
+        circle = next(a for a in draw_actions
+                      if a.text().replace("&", "") == "Circle").menu()
+        circle_actions = circle.actions()
+        next(a for a in circle_actions if a.text() == "Tan, Tan, Tan").trigger()
+        assert prompts[-2:] == ["Specify first point on circle:", "_tan to"]
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()

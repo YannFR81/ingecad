@@ -1744,9 +1744,12 @@ class ToolController(QObject):
             return self.osnap_override
         return frozenset(self.osnap_modes) if self.osnap_on else frozenset()
 
-    def set_osnap_override(self, keys) -> bool:
+    def set_osnap_override(self, keys, typed: bool = False) -> bool:
         """Use only ``keys`` for the next point (empty: no snap at all).
-        False, with the reason echoed, for a mode that is not there yet."""
+        False, with the reason echoed, for a mode that is not there yet.
+
+        AutoCAD answers with "of" or "to" as the prompt ("_tan to" when the
+        snap came from a menu or a macro, just "to" after typing it)."""
         from core import osnap as osnap_modes
 
         keys = frozenset(keys)
@@ -1757,13 +1760,10 @@ class ToolController(QObject):
             return False
         self.osnap_override = keys
         if keys:
-            names = ", ".join(tr(osnap_modes.BY_KEY[k].label)
-                              for k in sorted(keys))
-            self.window.command_line.echo(
-                tr("{snap} for the next point.", snap=names))
-        else:
-            self.window.command_line.echo(
-                tr("No object snap for the next point."))
+            key = sorted(keys)[0]
+            word = osnap_modes.preposition(key)
+            self._on_prompt(tr(word) if typed else
+                            f"{osnap_modes.command_form(key)} {tr(word)}")
         if self._cursor is not None:
             self._refresh_snap_at_cursor()
         self.changed.emit()
@@ -2028,6 +2028,15 @@ class ToolController(QObject):
                 self._window_anchor = (wx, wy)
                 self.changed.emit()
                 return
+        tangent_pick = getattr(self.tool, "on_tangent_pick", None)
+        if (tangent_pick is not None and self.osnap_override
+                and "TAN" in self.osnap_override):
+            # a point picked with Tangent (CIRCLE 3P, Tan Tan Tan): the tool
+            # takes the object under the pick, line, arc or circle
+            self.osnap_override = None
+            tangent_pick((wx, wy))
+            self.changed.emit()
+            return
         hit = self.snap_hit
         deferred = getattr(self.tool, "on_deferred_tangent", None)
         if (hit is not None and hit.kind == "DTAN" and hit.circle is not None
@@ -2548,7 +2557,7 @@ class ToolController(QObject):
 
             override = osnap_modes.override_from_text(stripped)
             if override is not None:
-                self.set_osnap_override(override)
+                self.set_osnap_override(override, typed=True)
                 return True
         if self.tool.on_option(stripped):
             self._preview_now()        # a Text/Angle/Horizontal option changes the picture

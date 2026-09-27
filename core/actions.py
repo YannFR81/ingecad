@@ -520,7 +520,8 @@ def tangent_circle(obj1, pick1, obj2, pick2, radius: float):
 def ttt_circle(tangents):
     """CIRCLE Tan, Tan, Tan: ``(center, radius)`` of the circle tangent to
     three objects -- lines or circles, in ``_tangent_loci``'s form -- each
-    given with the point where it was picked.
+    given with the point where it was picked. An object may also be
+    ``("point", p)``: CIRCLE 3P with a tangent snap on only some points.
 
     Every way of touching is tried (each side of a line; outside, inside or
     around a circle), each solved by Newton from the circle through the
@@ -534,10 +535,16 @@ def ttt_circle(tangents):
     scale = max(1.0, *(abs(v) for p in picks for v in p))
 
     def variants(obj):
+        if obj[0] == "point":
+            return ("on",)
         return (1.0, -1.0) if obj[0] == "line" else ("out", "in", "around")
 
     def residual(obj, how, cx, cy, r):
         """(value, d/dcx, d/dcy, d/dr) of one tangency condition."""
+        if obj[0] == "point":          # CIRCLE 3P mixes points and tangents
+            (px, py) = obj[1]
+            d = math.hypot(cx - px, cy - py) or 1e-12
+            return d - r, (cx - px) / d, (cy - py) / d, -1.0
         if obj[0] == "line":
             (px, py), (qx, qy) = obj[1], obj[2]
             length = math.hypot(qx - px, qy - py)
@@ -554,6 +561,8 @@ def ttt_circle(tangents):
         return d - r + big_r, gx, gy, -1.0            # around it
 
     def tangent_point(obj, how, center):
+        if obj[0] == "point":
+            return obj[1]
         point = _tangent_point(obj, center)
         if obj[0] == "circle" and how == "around":
             (ox, oy) = obj[1]
