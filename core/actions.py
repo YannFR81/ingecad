@@ -699,13 +699,30 @@ class TransformCommand(Command):
         self._before: list = []
 
     def do(self, document) -> None:
+        from core import mirrtext
+
+        readable = self.upright and mirrtext.keeps_text_readable(document)
         self._before = []
+        #: Attributes of mirrored blocks made readable: their INSERT goes
+        #: back through the inverse, then they get their own state back.
+        self._attribs_before = []
         for e in self.entities:
-            if self.upright and e.dxftype() in ocs.OCS_TYPES:
-                self._before.append((e, e.copy()))
+            kind = e.dxftype()
+            text = readable and kind in mirrtext.TEXT_TYPES
+            before = None
+            if (self.upright and kind in ocs.OCS_TYPES) or text:
+                before = e.copy()
+                self._before.append((e, before))
+            attribs = ([(a, a.copy()) for a in e.attribs]
+                       if readable and kind == "INSERT" else [])
             transform_entity(e, self.matrix)
-            if self.upright and e.dxftype() in ocs.OCS_TYPES:
+            if self.upright and kind in ocs.OCS_TYPES:
                 ocs.upright(e)
+            if text:
+                mirrtext.make_readable(e, before, self.matrix)
+            for attrib, snapshot in attribs:
+                mirrtext.make_readable(attrib, snapshot, self.matrix)
+            self._attribs_before.extend(attribs)
         document.dirty = True
 
     def undo(self, document) -> None:
@@ -721,6 +738,9 @@ class TransformCommand(Command):
         for e in self.entities:
             if id(e) not in restored:
                 transform_entity(e, inverse)
+        for attrib, snapshot in getattr(self, "_attribs_before", []):
+            _restore_entity(attrib, snapshot)
+        self._attribs_before = []
         document.dirty = True
 
 
@@ -758,6 +778,9 @@ class CopyEntitiesCommand(Command):
         self.copies = []
 
     def do(self, document) -> None:
+        from core import mirrtext
+
+        readable = self.upright and mirrtext.keeps_text_readable(document)
         msp = self.space(document)
         self.copies = []
         for e in self.sources:
@@ -765,6 +788,11 @@ class CopyEntitiesCommand(Command):
             transform_entity(clone, self.matrix)
             if self.upright and clone.dxftype() in ocs.OCS_TYPES:
                 ocs.upright(clone)
+            if readable:
+                mirrtext.make_readable(clone, e, self.matrix)
+                if clone.dxftype() == "INSERT":
+                    for attrib, source in zip(clone.attribs, e.attribs):
+                        mirrtext.make_readable(attrib, source, self.matrix)
             msp.add_entity(clone)
             self.copies.append(clone)
         document.dirty = True

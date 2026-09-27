@@ -102,6 +102,9 @@ class Document:
 
         document = cls(ezdxf.new("R2018", setup=["linetypes"]))
         _styles.install_default_styles(document)
+        # AutoCAD's templates: MIRROR keeps text readable. ezdxf's own
+        # default is 1 (mirror writing).
+        document.doc.header["$MIRRTEXT"] = 0
         return document
 
     @classmethod

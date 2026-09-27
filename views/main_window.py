@@ -2785,6 +2785,7 @@ class MainWindow(QMainWindow):
         d.register("MSPACE", self._cmd_mspace)
         d.register("DRAWINGRECOVERY", self._cmd_drawing_recovery)
         d.register("SAVETIME", self._cmd_savetime)
+        d.register("MIRRTEXT", self._cmd_mirrtext)
         d.register("PSPACE", self._cmd_pspace)
         d.register("VPLOCK", self._cmd_vplock)
         d.register("PAGESETUP", self._cmd_pagesetup)
@@ -4153,6 +4154,36 @@ class MainWindow(QMainWindow):
         if not self.maybe_save_changes():
             return
         offer_recovery(self)
+
+    def _cmd_mirrtext(self, *args) -> Prompt | None:
+        """MIRRTEXT — 0 keeps mirrored text readable, 1 mirrors it (saved in
+        the drawing, initial value 0)."""
+        if self.document is None:
+            self.new_document()
+        from core import mirrtext
+
+        current = 0 if mirrtext.keeps_text_readable(self.document) else 1
+        if args and str(args[0]).strip():
+            return self._set_mirrtext(str(args[0]))
+        return Prompt(
+            tr("Enter new value for MIRRTEXT <{v}>:", v=current),
+            self._set_mirrtext)
+
+    def _set_mirrtext(self, text: str) -> None:
+        text = str(text).strip()
+        if not text:
+            return
+        try:
+            value = int(text)
+        except ValueError:
+            self.command_line.echo(tr("Requires an integer value."))
+            return
+        if value not in (0, 1):
+            self.command_line.echo(
+                tr("Value must be between {min} and {max}.", min=0, max=1))
+            return
+        self.document.doc.header["$MIRRTEXT"] = value
+        self.document.dirty = True
 
     def _cmd_savetime(self, *args) -> Prompt | None:
         """SAVETIME — minutes between automatic saves; 0 turns them off."""

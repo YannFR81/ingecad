@@ -393,6 +393,7 @@
   "Enter new linetype scale factor <{current}>:": "Indique el nuevo factor de escala de tipo de línea <{current}>:",
   "Enter new value ({min}-{max}):": "Indique el nuevo valor ({min}-{max}):",
   "Enter new value for SAVETIME <{v}>:": "Indique el nuevo valor de SAVETIME <{v}>:",
+  "Enter new value for MIRRTEXT <{v}>:": "Indique el nuevo valor de MIRRTEXT <{v}>:",
   "Enter new value for CLAYER <\"{name}\">:": "Indique el nuevo valor de CLAYER <\"{name}\">:",
   "Enter new value for {name} <{value}>:": "Indique el nuevo valor de {name} <{value}>:",
   "Enter next point or [Close/Undo]:": "Indique el punto siguiente o [Cerrar(C)/desHacer(U)]:",
