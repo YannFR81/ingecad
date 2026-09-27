@@ -780,15 +780,34 @@ def transform_entity(entity, matrix) -> None:
         transform_viewport(entity, matrix)
 
 
-def can_transform(entity, matrix) -> bool:
-    """False for the few pairs of (object, matrix) that have no answer.
+def transformable(entity) -> bool:
+    """Can ezdxf move, rotate or copy this object at all?"""
+    from ezdxf.entities.dxfgfx import DXFGraphic
 
-    Only one today: a VIEWPORT has no angle of its own, so a rotation would
-    have to deform its rectangle. Refusing it up front keeps the command
-    consistent -- what it transforms, it un-transforms.
+    return type(entity).transform is not DXFGraphic.transform
+
+
+def _copy_or_none(entity):
+    """A copy of ``entity``, or None for a type ezdxf will not copy."""
+    try:
+        return entity.copy()
+    except Exception:  # noqa: BLE001 -- CopyNotSupported and kin
+        return None
+
+
+def can_transform(entity, matrix) -> bool:
+    """False for the pairs of (object, matrix) that have no answer.
+
+    A VIEWPORT has no angle of its own, so a rotation would have to deform
+    its rectangle. And ezdxf cannot move or copy some objects at all -- a
+    Civil 3D proxy, an OLE object: before this, MOVE over a window that took
+    one raised half-way, leaving what it had moved moved and no undo. Such
+    objects are left where they are and the command says so. Refusing up
+    front keeps every command consistent -- what it transforms, it
+    un-transforms.
     """
     if entity.dxftype() != "VIEWPORT":
-        return True
+        return transformable(entity)
     from ezdxf.math import Vec3
 
     origin = matrix.transform(Vec3(0, 0, 0))
@@ -890,7 +909,10 @@ class CopyEntitiesCommand(Command):
     name = "COPY"
 
     def __init__(self, entities, matrix, upright: bool = False) -> None:
-        self.sources = list(entities)
+        entities = list(entities)
+        #: Objects ezdxf cannot copy or move (see can_transform).
+        self.skipped = [e for e in entities if not can_transform(e, matrix)]
+        self.sources = [e for e in entities if can_transform(e, matrix)]
         self.matrix = matrix
         #: See TransformCommand.upright; a copy has no undo state to keep.
         self.upright = upright
@@ -903,7 +925,9 @@ class CopyEntitiesCommand(Command):
         msp = self.space(document)
         self.copies = []
         for e in self.sources:
-            clone = e.copy()
+            clone = _copy_or_none(e)
+            if clone is None:
+                continue
             transform_entity(clone, self.matrix)
             if self.upright and clone.dxftype() in ocs.OCS_TYPES:
                 ocs.upright(clone)
@@ -1961,7 +1985,9 @@ class PasteCommand(Command):
     name = "PASTE"
 
     def __init__(self, sources, dx: float, dy: float) -> None:
-        self.sources = list(sources)
+        sources = list(sources)
+        self.skipped = [e for e in sources if not transformable(e)]
+        self.sources = [e for e in sources if transformable(e)]
         self.dx = dx
         self.dy = dy
         self.copies: list = []
@@ -1973,7 +1999,9 @@ class PasteCommand(Command):
         m = Matrix44.translate(self.dx, self.dy, 0.0)
         self.copies = []
         for e in self.sources:
-            clone = e.copy()
+            clone = _copy_or_none(e)
+            if clone is None:
+                continue
             transform_entity(clone, m)
             msp.add_entity(clone)
             self.copies.append(clone)

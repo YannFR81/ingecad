@@ -2753,6 +2753,13 @@ class MainWindow(QMainWindow):
             return
         self._start_regen()
 
+    def regen_in_background(self) -> None:
+        """A big edit shown by a background regen: say so where the
+        coordinates go until the new scene lands."""
+        self._busy_regen = True
+        self._set_busy(tr("Regenerating..."))
+        self.regen_in_memory()
+
     def _start_regen(self) -> None:
         self._regen_rerun = False
         worker = RegenWorker(self.document, self._active_layout,
@@ -2763,6 +2770,9 @@ class MainWindow(QMainWindow):
 
     def _on_regen_done(self, document, scene, revision, layout) -> None:
         worker, self._regen_worker = self._regen_worker, None
+        if getattr(self, "_busy_regen", False) and not self._regen_rerun:
+            self._busy_regen = False
+            self._set_busy("")
         if worker is not None:
             worker.wait()   # thread has emitted; joins immediately
             if scene is not None:

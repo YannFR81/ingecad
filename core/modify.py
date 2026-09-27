@@ -97,7 +97,10 @@ def stretch_points(entity) -> list[Point]:
 def _move_whole(entity, dx: float, dy: float) -> None:
     from ezdxf.math import Matrix44
 
-    transform_entity(entity, Matrix44.translate(dx, dy, 0))
+    from core.actions import transformable
+
+    if transformable(entity):          # a proxy or an OLE object stays
+        transform_entity(entity, Matrix44.translate(dx, dy, 0))
 
 
 def stretch_entity(entity, rects, dx: float, dy: float) -> bool:
@@ -584,7 +587,11 @@ class ArrayCommand(Command):
     name = "ARRAY"
 
     def __init__(self, entities, transforms) -> None:
-        self.entities = list(entities)
+        from core.actions import transformable
+
+        entities = list(entities)
+        self.skipped = [e for e in entities if not transformable(e)]
+        self.entities = [e for e in entities if transformable(e)]
         self._transforms = list(transforms)
         self.new_entities: list = []
 

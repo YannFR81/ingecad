@@ -36,6 +36,21 @@ from views.apertures import GRIP_PX, PICKBOX_DEFAULT, SNAP_PX
 # Overlay entities beyond this schedule an idle merge into the base scene
 # (the overlay is re-tessellated per edit, so it must not grow unbounded).
 MERGE_THRESHOLD = 50
+#: An undo or redo touching more objects than this is shown by a background
+#: regen, not re-drawn one by one on the GUI thread (see after_history_change).
+BIG_EDIT = 2000
+#: A drawing with more objects than this in the current space waits for the
+#: background warmer instead of building its caches on the GUI thread.
+WARM_GUARD = 3000
+
+
+def _look_only(command) -> bool:
+    """A command that changes how objects look, never where they are or
+    whether they show: colour, linetype, lineweight (not the layer, which
+    may be off or frozen)."""
+    return (isinstance(command, actions.SetPropertyCommand)
+            and command.prop in ("color", "linetype", "lineweight",
+                                 "true_color", "ltscale"))
 # MOVE/COPY/PASTE commits at or above this size reuse the ghost tessellation
 # as a "stamp" instead of re-tessellating into the overlay (a 3000-entity
 # paste re-tessellated ~3.5 s on the UI thread; the stamp costs nothing).
@@ -447,6 +462,21 @@ class ToolController(QObject):
         warmer.done.connect(self._on_caches_warm)
         self._warmers.add(warmer)
         warmer.start()
+
+    def caches_warming(self) -> bool:
+        """A warmer is still building the snap cache the cursor would need,
+        the one in hand is not built yet, and the drawing is big enough for
+        building it here to be felt (a small one builds in milliseconds)."""
+        return (bool(self._warmers) and self._big_space()
+                and (self.snap_engine is None or self.snap_engine._dirty))
+
+    def _big_space(self) -> bool:
+        document = self.window.document
+        try:
+            return document is not None and \
+                len(document.current_space()) > WARM_GUARD
+        except Exception:  # noqa: BLE001
+            return False
 
     def _on_caches_warm(self, document, index, engine, revision,
                         space, model_engine=None) -> None:
@@ -1261,9 +1291,16 @@ class ToolController(QObject):
         skipped = getattr(command, "skipped", None)
         if skipped:
             # Say what did not move rather than let the command look done.
-            self.window.command_line.echo(
-                tr("{count} object(s) unchanged: a viewport has no angle to "
-                   "rotate.", count=len(skipped)))
+            kinds = sorted({e.dxftype() for e in skipped})
+            if kinds == ["VIEWPORT"]:
+                self.window.command_line.echo(
+                    tr("{count} object(s) unchanged: a viewport has no angle "
+                       "to rotate.", count=len(skipped)))
+            else:
+                self.window.command_line.echo(
+                    tr("{count} object(s) unchanged: IngeCAD cannot move or "
+                       "copy {kinds}.", count=len(skipped),
+                       kinds=", ".join(kinds)))
         # Any real edit invalidates the model tessellation the layout tab
         # keeps for live viewport navigation.
         invalidate = getattr(self.window, "invalidate_vp_model_cache", None)
@@ -1476,6 +1513,25 @@ class ToolController(QObject):
             touched.append(command.dim)   # AddDimensionCommand, one entity
         for _orig, parts in (getattr(command, "pieces", None) or []):
             touched.extend(parts)
+        if len(touched) > BIG_EDIT:
+            # Thousands of objects at once (undo of a colour change or an
+            # ERASE over the whole plan): re-drawing them through the
+            # overlay and re-filing each one in the pick index froze the
+            # window 7-8 s on a 10 000-entity sheet. Rebuild everything in
+            # the background instead -- the window keeps answering and the
+            # result lands with the regen, as when the plan was opened.
+            removed = list(getattr(command, "removed_handles", None) or [])
+            if removed:
+                self.window.viewport.hide_handles(removed)
+            self._pending_render = []
+            self._refresh_overlay()
+            if not _look_only(command):
+                # a colour or a layer moves nothing: the pick and snap
+                # caches stay valid, and the selection's highlight with them
+                self._invalidate_geometry()
+                self._start_warmer(self.window.document)
+            self.window.regen_in_background()
+            return
         # hide stale base copies: entities the undo/redo just destroyed
         # (recorded handles) plus every touched survivor's base-scene copy
         hide = list(getattr(command, "removed_handles", None) or [])
@@ -1644,6 +1700,12 @@ class ToolController(QObject):
             and not self.tool.entity_picker)
         if not inside:
             needs_snap = False    # over the paper, outside the viewport
+        if needs_snap and self.caches_warming():
+            # The caches are being built in the background right after an
+            # open. Building them here instead froze the first mouse move
+            # on a big plan (135 ms on a 10 000-entity sheet, seconds on a
+            # cadastre); snaps come back the moment the warm caches land.
+            needs_snap = False
         kinds = self.snap_kinds()
         self.track_hint = None
         if needs_snap and self.snap_engine is not None and kinds:
@@ -3054,6 +3116,14 @@ class ToolController(QObject):
         cached = self._highlight_cache
         if cached is not None and cached[0] == key:
             return cached[1]
+        if self.index._dirty and self._warmers and self._big_space():
+            # a warmer is rebuilding the index in the background: building it
+            # here too froze the window for seconds on a big selection. Keep
+            # the last highlight (or none) until the warm index lands.
+            if cached is not None:
+                return cached[1]
+            empty = np.empty((0, 4))
+            return empty, empty, empty
         result = (self.index.segments_of(self.selection),
                   self.index.circles_of(self.selection),
                   self.index.boxes_of(self.selection))

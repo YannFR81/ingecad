@@ -50,11 +50,13 @@ def classroom(tmp_path, monkeypatch, qapp):
     yield folder, installed
     QCoreApplication.setOrganizationName(names[0])
     QCoreApplication.setApplicationName(names[1])
-    xdg = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg").split(":")[0]
+    # back to what Qt uses by default -- which, under the test suite, is the
+    # scratch XDG_CONFIG_HOME conftest sets, NEVER the developer's ~/.config
+    system = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg").split(":")[0]
+    user = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     for fmt in (QSettings.NativeFormat, QSettings.IniFormat):
-        QSettings.setPath(fmt, QSettings.SystemScope, xdg)
-        QSettings.setPath(fmt, QSettings.UserScope,
-                          os.path.expanduser("~/.config"))
+        QSettings.setPath(fmt, QSettings.SystemScope, system)
+        QSettings.setPath(fmt, QSettings.UserScope, user)
 
 
 def test_the_classroom_settings_are_every_students_defaults(classroom):

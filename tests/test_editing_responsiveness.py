@@ -234,3 +234,107 @@ def test_ordinary_edits_leave_the_pick_index_usable(win, build):
 
     win.tools._execute(build(msp, ents))
     assert win.tools.index._dirty is False
+
+
+def test_hovering_while_the_caches_warm_never_builds_them(win, monkeypatch):
+    """Right after an open the snap cache is built by a background warmer.
+    A mouse move in between built it again on the GUI thread: the first
+    move on a big plan froze (135 ms measured on a 10 084-entity sheet)."""
+    import views.tool_controller as tc_mod
+
+    monkeypatch.setattr(tc_mod, "WARM_GUARD", 10)     # "a big plan", scaled down
+    msp = win.document.modelspace()
+    for i in range(50):
+        msp.add_line((i, 0), (i, 10))
+    tools = win.tools
+    import time
+
+    from PySide6.QtWidgets import QApplication
+    deadline = time.monotonic() + 20
+    while tools._warmers and time.monotonic() < deadline:
+        QApplication.processEvents()                  # the open's own warmer
+    tools._invalidate_geometry()
+    tools.start_tool("LINE")
+    sentinel = object()
+    tools._warmers.add(sentinel)                      # a warmer in flight
+    try:
+        assert tools.caches_warming()
+        tools.on_hover(0.1, 0.1, threshold_world=1.0)
+        assert tools.snap_engine is None or tools.snap_engine._dirty
+        assert tools.snap_hit is None
+    finally:
+        tools._warmers.discard(sentinel)
+    tools.on_hover(0.1, 0.1, threshold_world=1.0)     # warm or not: snaps back
+    assert tools.snap_hit is not None
+    tools.cancel()
+
+
+# -- big undo/redo: shown by a background regen, never re-drawn one by one ----
+
+def _big_selection(win, monkeypatch, count=12):
+    import views.tool_controller as tc_mod
+
+    monkeypatch.setattr(tc_mod, "BIG_EDIT", 5)       # "thousands", scaled down
+    monkeypatch.setattr(tc_mod, "WARM_GUARD", 5)
+    msp = win.document.modelspace()
+    ents = [msp.add_line((i, 0), (i, 10)) for i in range(count)]
+    win.tools._invalidate_geometry()
+    return ents
+
+
+def _drain_warmers(win):
+    import time
+
+    from PySide6.QtWidgets import QApplication
+    deadline = time.monotonic() + 20
+    while win.tools._warmers and time.monotonic() < deadline:
+        QApplication.processEvents()
+
+
+def test_undoing_a_big_colour_change_redraws_nothing_on_the_gui_thread(
+        win, monkeypatch):
+    """Undo of a colour change over a whole 10 084-entity sheet froze the
+    window 6.9 s: every object re-drawn through the overlay, the pick index
+    rebuilt while the selection's highlight asked for it."""
+    ents = _big_selection(win, monkeypatch)
+    _drain_warmers(win)
+    tools = win.tools
+    tools.index._build() if tools.index is not None else None
+    win.history.execute(actions.SetPropertyCommand(ents, "color", 1))
+    regens = []
+    monkeypatch.setattr(win, "regen_in_background", lambda: regens.append(1))
+    command = win.history.undo()
+    tools.after_history_change(command)
+    assert regens == [1]                              # a background regen
+    assert tools._pending_render == []                # no overlay re-draw
+    assert tools.index is None or not tools.index._dirty   # geometry kept
+
+
+def test_undoing_a_big_erase_rebuilds_the_caches_in_the_background(
+        win, monkeypatch):
+    ents = _big_selection(win, monkeypatch)
+    win.history.execute(actions.EraseCommand(ents))
+    regens, warmers = [], []
+    monkeypatch.setattr(win, "regen_in_background", lambda: regens.append(1))
+    monkeypatch.setattr(win.tools, "_start_warmer",
+                        lambda document: warmers.append(document))
+    command = win.history.undo()
+    win.tools.after_history_change(command)
+    assert regens == [1] and warmers == [win.document]
+    assert win.tools._pending_render == []
+
+
+def test_the_highlight_never_builds_the_index_while_it_warms(win, monkeypatch):
+    ents = _big_selection(win, monkeypatch)
+    tools = win.tools
+    _drain_warmers(win)
+    tools.selection = {e.dxf.handle for e in ents}
+    tools._invalidate_geometry()
+    sentinel = object()
+    tools._warmers.add(sentinel)
+    try:
+        tools._highlight_cache = None
+        segs, _c, _b = tools.highlight_geometry()
+        assert tools.index._dirty and len(segs) == 0
+    finally:
+        tools._warmers.discard(sentinel)

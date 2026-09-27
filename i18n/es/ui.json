@@ -393,6 +393,7 @@
   "Enter new linetype scale factor <{current}>:": "Indique el nuevo factor de escala de tipo de línea <{current}>:",
   "Enter new value ({min}-{max}):": "Indique el nuevo valor ({min}-{max}):",
   "Enter new value for SAVETIME <{v}>:": "Indique el nuevo valor de SAVETIME <{v}>:",
+  "{count} object(s) unchanged: IngeCAD cannot move or copy {kinds}.": "{count} objeto(s) sin cambiar: IngeCAD no puede desplazar ni copiar {kinds}.",
   "The Model tab cannot be copied.": "La ficha Modelo no se puede copiar.",
   "Layout \"{source}\" copied to \"{name}\".": "Presentación \"{source}\" copiada en \"{name}\".",
   "Enter layout name for copy <{name}>:": "Indique nombre de la copia de la presentación <{name}>:",
