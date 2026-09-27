@@ -847,6 +847,7 @@ class FilletTool(Tool):
             return
         if self._first is None:
             self._first = entity
+            self._first_pick = point
             self.prompt("Select second line:")
             return
         if entity is self._first:
@@ -857,6 +858,21 @@ class FilletTool(Tool):
         s2 = (entity.dxf.start.x, entity.dxf.start.y,
               entity.dxf.end.x, entity.dxf.end.y)
         r = type(self).radius
+        parallel = editmath.fillet_parallel(s1, self._first_pick, s2)
+        if parallel is not None:
+            # The first line stays; the second is trimmed to the semicircle.
+            new_s2, (center, radius, a0, a1) = parallel
+            from core.modify import common_style_source, inherit_style
+
+            source = common_style_source([self._first, entity])
+            self.ctx.execute(actions.ReplaceEntitiesCommand(
+                "FILLET", [entity],
+                [lambda msp, p=new_s2: inherit_style(
+                    msp.add_line((p[0], p[1]), (p[2], p[3])), entity),
+                 lambda msp: inherit_style(
+                    msp.add_arc(center, radius, a0, a1), source)]))
+            self.ctx.finish()
+            return
         if r == 0:
             result = editmath.fillet_corner(s1, s2)
             if result is None:

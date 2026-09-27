@@ -355,6 +355,43 @@ def test_fillet_zero_radius():
     assert (12.0, 0.0, 12.0, 10.0) in xs
 
 
+def _fillet_parallel(radius):
+    """#15: offset a line by 4, fillet the pair: a semicircle of radius 2 at
+    the end of the FIRST line nearest its pick, whatever the radius is.
+    The first line stays as it is; the second is trimmed to the arc."""
+    h = Harness()
+    first = h.msp.add_line((0, 0), (10, 0))
+    h.msp.add_line((-5, 4), (20, 4))
+    tool = FilletTool(h.ctx)
+    type(tool).radius = radius
+    tool.start()
+    tool.on_point((8, 0))           # near the right end of the first line
+    tool.on_point((3, 4))
+    lines = sorted((round(l.dxf.start.x, 6), round(l.dxf.start.y, 6),
+                    round(l.dxf.end.x, 6), round(l.dxf.end.y, 6))
+                   for l in h.msp.query("LINE"))
+    arcs = list(h.msp.query("ARC"))
+    return h, first, lines, arcs
+
+
+@pytest.mark.parametrize("radius", [5.0, 0.0])
+def test_fillet_parallel_lines_joins_them_with_a_semicircle(radius):
+    h, first, lines, arcs = _fillet_parallel(radius)
+    assert first.is_alive and (0.0, 0.0, 10.0, 0.0) in lines
+    assert (-5.0, 4.0, 10.0, 4.0) in lines        # trimmed to the arc
+    assert len(arcs) == 1
+    arc = arcs[0]
+    assert (arc.dxf.center.x, arc.dxf.center.y) == (pytest.approx(10),
+                                                    pytest.approx(2))
+    assert arc.dxf.radius == pytest.approx(2)
+    # the half that bulges outward, beyond the lines' ends
+    assert arc.dxf.start_angle % 360 == pytest.approx(270)
+    assert arc.dxf.end_angle % 360 == pytest.approx(90)
+    assert FilletTool.radius == radius            # the setting is untouched
+    h.history.undo()
+    assert not list(h.msp.query("ARC"))
+
+
 def test_extend_ignores_phantom_arc_circle():
     # User repro: a trimmed circle (now an ARC) must NOT act as its full
     # phantom circle — EXTEND has to reach the real edge beyond it.

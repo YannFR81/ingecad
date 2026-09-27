@@ -480,6 +480,49 @@ def fillet_arc(s1: Seg, s2: Seg, radius: float):
     return ((cx, cy), radius, a1, a2, t1, t2)
 
 
+def fillet_parallel(s1: Seg, pick1: Point, s2: Seg):
+    """FILLET of two parallel lines: ``(new_s2, (center, r, a0, a1))``.
+
+    AutoCAD's rule ("Fillet Parallel Lines"): the radius is temporarily
+    half the distance between them, whatever it is set to; the semicircle
+    goes at the end of the FIRST line nearest its pick, that line stays as
+    it is, and the second is trimmed or extended to meet the arc. Returns
+    None when the lines are not parallel or lie on one line.
+    """
+    dx, dy = s1[2] - s1[0], s1[3] - s1[1]
+    ex, ey = s2[2] - s2[0], s2[3] - s2[1]
+    l1, l2 = math.hypot(dx, dy), math.hypot(ex, ey)
+    if l1 < EPS or l2 < EPS or abs(dx * ey - dy * ex) > 1e-9 * l1 * l2:
+        return None
+    ux, uy = dx / l1, dy / l1
+    # the end of the first line nearest the pick, and the way out past it
+    if math.hypot(pick1[0] - s1[2], pick1[1] - s1[3]) <= math.hypot(
+            pick1[0] - s1[0], pick1[1] - s1[1]):
+        end, ox, oy = (s1[2], s1[3]), ux, uy
+    else:
+        end, ox, oy = (s1[0], s1[1]), -ux, -uy
+    # foot of that end on the second line
+    t = (end[0] - s2[0]) * ux + (end[1] - s2[1]) * uy
+    foot = (s2[0] + ux * t, s2[1] + uy * t)
+    width = math.hypot(foot[0] - end[0], foot[1] - end[1])
+    if width < EPS:
+        return None
+    center = ((end[0] + foot[0]) / 2, (end[1] + foot[1]) / 2)
+    r = width / 2
+    # keep the second line's end that lies back along the first line
+    back = min(((s2[0], s2[1]), (s2[2], s2[3])),
+               key=lambda p: (p[0] - foot[0]) * ox + (p[1] - foot[1]) * oy)
+    new_s2 = (back[0], back[1], foot[0], foot[1])
+    a_end = math.degrees(math.atan2(end[1] - center[1], end[0] - center[0]))
+    a_foot = math.degrees(math.atan2(foot[1] - center[1], foot[0] - center[0]))
+    a_out = math.degrees(math.atan2(oy, ox))
+    # counterclockwise from a0 to a1 must pass through the outward side
+    a0, a1 = a_end, a_foot
+    if (a_out - a0) % 360.0 > (a1 - a0) % 360.0:
+        a0, a1 = a1, a0
+    return new_s2, (center, r, a0 % 360.0, a1 % 360.0)
+
+
 def chamfer_pieces(s1: Seg, s2: Seg, d1: float, d2: float):
     """CHAMFER: the two trimmed lines and the bevel that joins them.
 
