@@ -472,6 +472,110 @@ def test_fillet_radius_zero_line_and_arc_meet_at_the_corner():
     assert _meets(line, arc)
 
 
+def _fillet_tool(h, radius=5.0):
+    FilletTool.radius = radius
+    h.ctx.undo_last = h.history.undo
+    tool = FilletTool(h.ctx)
+    tool.start()
+    return tool
+
+
+def _corner(h):
+    h.msp.add_line((0, 0), (20, 0))
+    h.msp.add_line((20, 0), (20, 20))
+
+
+def test_fillet_prompts_follow_autocad():
+    """Command Reference, FILLET: the settings line, the options, and the
+    second prompt with its Shift hint."""
+    h = Harness()
+    _corner(h)
+    tool = _fillet_tool(h, 5.0)
+    assert h.prompts[-2] == "Current settings: Mode = TRIM, Radius = 5.0000"
+    assert h.prompts[-1] == ("Select first object or "
+                             "[Undo/Polyline/Radius/Trim/Multiple]:")
+    tool.on_option("R")
+    assert h.prompts[-1] == "Specify fillet radius <5.0000>:"
+    tool.on_option("3")
+    assert FilletTool.radius == 3.0
+    assert h.prompts[-1].startswith("Select first object or [Undo/")
+    tool.on_point((10, 0))
+    assert h.prompts[-1] == "Select second object or shift-select to apply corner:"
+
+
+def test_fillet_shift_on_the_second_pick_makes_a_corner():
+    h = Harness()
+    h.msp.add_line((0, 0), (18, 0))
+    h.msp.add_line((20, 2), (20, 20))
+    tool = _fillet_tool(h, 5.0)
+    tool.on_point((10, 0))
+    tool.shift = True
+    tool.on_point((20, 10))
+    assert not list(h.msp.query("ARC"))               # radius 0 this once
+    ends = sorted((round(l.dxf.end.x, 6), round(l.dxf.end.y, 6))
+                  for l in h.msp.query("LINE"))
+    assert (20.0, 0.0) in ends or any(
+        (round(l.dxf.start.x, 6), round(l.dxf.start.y, 6)) == (20.0, 0.0)
+        for l in h.msp.query("LINE"))
+    assert FilletTool.radius == 5.0                   # the setting stays
+
+
+def test_fillet_no_trim_keeps_the_edges_and_is_shared_with_chamfer():
+    from core import trimmode
+    from tools.modify import ChamferTool
+
+    h = Harness()
+    _corner(h)
+    tool = _fillet_tool(h, 5.0)
+    try:
+        tool.on_option("T")
+        assert h.prompts[-1] == "Enter Trim mode option [Trim/No trim] <Trim>:"
+        tool.on_option("N")
+        assert trimmode.trimmode() is False
+        tool.on_point((10, 0))
+        tool.on_point((20, 10))
+        assert len(list(h.msp.query("LINE"))) == 2    # both untouched
+        assert len(list(h.msp.query("ARC"))) == 1
+        chamfer = ChamferTool(h.ctx)
+        chamfer.start()
+        assert any("NOTRIM" in p for p in h.prompts[-2:])   # one TRIMMODE
+    finally:
+        trimmode.set_trimmode(True)
+
+
+def test_fillet_multiple_and_undo():
+    h = Harness()
+    _corner(h)
+    h.msp.add_line((0, 40), (20, 40))
+    h.msp.add_line((20, 40), (20, 60))
+    tool = _fillet_tool(h, 5.0)
+    tool.on_option("M")
+    tool.on_point((10, 0))
+    tool.on_point((20, 10))
+    assert h.prompts[-1].startswith("Select first object or [Undo/")
+    tool.on_point((10, 40))
+    tool.on_point((20, 50))
+    assert len(list(h.msp.query("ARC"))) == 2
+    tool.on_option("U")                               # the last one only
+    assert len(list(h.msp.query("ARC"))) == 1
+    tool.on_enter()
+    assert h.finished
+
+
+def test_fillet_polyline_rounds_every_corner():
+    h = Harness()
+    pl = h.msp.add_lwpolyline([(0, 0), (20, 0), (20, 10), (0, 10)], close=True)
+    tool = _fillet_tool(h, 2.0)
+    tool.on_option("P")
+    assert h.prompts[-1] == "Select 2D polyline:"
+    tool.on_point((10, 0))
+    assert "4 lines were filleted" in h.prompts
+    new = next(iter(h.msp.query("LWPOLYLINE")))
+    assert not pl.is_alive or pl is not new
+    bulges = [round(b, 4) for *_xy, b in new.get_points("xyb")]
+    assert bulges.count(0.4142) == 4
+
+
 def test_extend_ignores_phantom_arc_circle():
     # User repro: a trimmed circle (now an ARC) must NOT act as its full
     # phantom circle — EXTEND has to reach the real edge beyond it.

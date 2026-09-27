@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from core import modify
+from core import modify, trimmode
 from core.commands import History
 from core.document import Document
 from tools.base import ToolContext
@@ -378,7 +378,8 @@ def test_a_chamfer_cuts_each_line_by_its_own_distance():
     h = Harness()
     a = h.msp.add_line((10, 0), (0, 0))
     b = h.msp.add_line((0, 10), (0, 0))
-    ChamferTool.dist1, ChamferTool.dist2, ChamferTool.trim = 3.0, 4.0, True
+    ChamferTool.dist1, ChamferTool.dist2 = 3.0, 4.0
+    trimmode.set_trimmode(True)
     tool = ChamferTool(h.ctx)
     tool.start()
     h._entity = a
@@ -403,7 +404,7 @@ def test_chamfer_with_no_trim_keeps_both_originals():
     a = h.msp.add_line((10, 0), (0, 0))
     b = h.msp.add_line((0, 10), (0, 0))
     ChamferTool.dist1 = ChamferTool.dist2 = 2.0
-    ChamferTool.trim = False
+    trimmode.set_trimmode(False)
     try:
         tool = ChamferTool(h.ctx)
         tool.start()
@@ -414,7 +415,7 @@ def test_chamfer_with_no_trim_keeps_both_originals():
         assert len(entities(h.document)) == 3      # both originals + bevel
         assert a.is_alive and b.is_alive
     finally:
-        ChamferTool.trim = True
+        trimmode.set_trimmode(True)
 
 
 def test_a_chamfer_that_does_not_fit_says_so_and_changes_nothing():

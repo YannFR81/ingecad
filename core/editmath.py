@@ -602,6 +602,64 @@ def arc_between(center: Point, p: Point, q: Point) -> tuple[float, float]:
     return a % 360.0, b % 360.0
 
 
+def fillet_polyline(rows, closed: bool, radius: float):
+    """FILLET Polyline: ``(new_rows, filleted, too_short)``.
+
+    ``rows`` are xyseb vertices. Every vertex where two straight segments
+    meet gets an arc of ``radius`` (a new vertex pair, the first carrying
+    the bulge); a corner whose segments are too short for it is counted and
+    left alone, as AutoCAD reports "n were too short".
+    """
+    rows = [tuple(r) for r in rows]
+    n = len(rows)
+    if n < 3 or radius <= 0:
+        return rows, 0, 0
+    corners = range(n) if closed else range(1, n - 1)
+    lengths = []
+    for i in range(n if closed else n - 1):
+        a, b = rows[i], rows[(i + 1) % n]
+        lengths.append(math.hypot(b[0] - a[0], b[1] - a[1]))
+    # length already taken from each segment's start and end by its corners
+    used_start = [0.0] * len(lengths)
+    used_end = [0.0] * len(lengths)
+    cuts = {}                          # vertex index -> (t_in, t_out, bulge)
+    filleted = too_short = 0
+    for i in corners:
+        prev, nxt = (i - 1) % n, (i + 1) % n
+        if rows[prev][4] or rows[i][4]:
+            continue                   # an arc on either side: not two lines
+        a, b, c = rows[prev], rows[i], rows[nxt]
+        result = fillet_arc((a[0], a[1], b[0], b[1]),
+                            (b[0], b[1], c[0], c[1]), radius)
+        if result is None:
+            continue                   # straight on: nothing to round
+        center, _r, _a0, _a1, t1, t2 = result
+        d_in = math.hypot(t1[0] - b[0], t1[1] - b[1])
+        d_out = math.hypot(t2[0] - b[0], t2[1] - b[1])
+        seg_in, seg_out = prev % len(lengths), i % len(lengths)
+        if (d_in + used_start[seg_in] > lengths[seg_in] + EPS
+                or d_out + used_end[seg_out] > lengths[seg_out] + EPS):
+            too_short += 1
+            continue
+        used_end[seg_in] = d_in
+        used_start[seg_out] = d_out
+        v1 = (t1[0] - center[0], t1[1] - center[1])
+        v2 = (t2[0] - center[0], t2[1] - center[1])
+        sweep = math.atan2(v1[0] * v2[1] - v1[1] * v2[0],
+                           v1[0] * v2[0] + v1[1] * v2[1])
+        cuts[i] = (t1, t2, math.tan(sweep / 4.0))
+        filleted += 1
+    out = []
+    for i, row in enumerate(rows):
+        if i in cuts:
+            t1, t2, bulge = cuts[i]
+            out.append((t1[0], t1[1], row[2], row[3], bulge))
+            out.append((t2[0], t2[1], row[2], row[3], 0.0))
+        else:
+            out.append(row)
+    return out, filleted, too_short
+
+
 def chamfer_pieces(s1: Seg, s2: Seg, d1: float, d2: float):
     """CHAMFER: the two trimmed lines and the bevel that joins them.
 

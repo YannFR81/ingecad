@@ -808,92 +808,198 @@ class ExtendTool(_TrimExtendBase):
 
 
 class FilletTool(Tool):
+    """FILLET, with AutoCAD's prompts and options (Command Reference,
+    FILLET): Undo, Polyline, Radius, Trim, Multiple, and Shift on the
+    second pick for a sharp corner."""
+
     entity_picker = True
     radius = 0.0  # session-sticky, AutoCAD-style
+
+    OPTIONS = "Select first object or [Undo/Polyline/Radius/Trim/Multiple]:"
 
     def start(self) -> None:
         self.name = "FILLET"
         self._first = None
-        self.prompt("FILLET (radius {radius}) select first object or [Radius]:",
-                    radius=type(self).radius)
+        self._first_pick = None
+        self._await = None             # "radius", "trim", "polyline"
+        self._multiple = False
+        self._done = 0                 # fillets made by this command (Undo)
+        self._announce()
+
+    def _fmt(self, value: float) -> str:
+        from core import units as units_mod
+
+        services = self.ctx.services
+        try:
+            u = services.units()
+            return units_mod.format_length(value, u.lunits, u.luprec)
+        except Exception:  # noqa: BLE001 -- no drawing units: AutoCAD's default
+            return f"{value:.4f}"
+
+    def _announce(self) -> None:
+        from core import trimmode
+
+        self.ctx.echo(tr("Current settings: Mode = {mode}, Radius = {radius}",
+                         mode=tr("TRIM") if trimmode.trimmode() else tr("NOTRIM"),
+                         radius=self._fmt(type(self).radius)))
+        self.prompt(self.OPTIONS)
+
+    def _first_prompt(self) -> None:
+        self._first = None
+        self._first_pick = None
+        self.prompt(self.OPTIONS)
+
+    def _after_fillet(self) -> None:
+        """One pair done: Multiple asks again, otherwise the command ends."""
+        self._done += 1
+        if self._multiple:
+            self._first_prompt()
+        else:
+            self.ctx.finish()
 
     def on_option(self, text: str) -> bool:
-        # The resolver first: it turns the localized keyword, or
-        # AutoCAD's _global form, into the English key the
-        # branches below have always compared against.
-        t = self.option(text) or text.upper()
-        if t in ("R", "RADIUS"):
-            self.prompt("Specify fillet radius:")
-            self._waiting_radius = True
-            return True
-        if getattr(self, "_waiting_radius", False):
+        from core import trimmode
+
+        t = self.option(text) or text.strip().upper()
+        if self._await == "radius":
+            if not text.strip():
+                self._await = None
+                self._first_prompt()
+                return True
             try:
                 r = float(text)
             except ValueError:
-                return False
+                self.ctx.echo(tr("Requires a positive number."))
+                return True
             if r < 0:
                 self.ctx.echo(tr("Value must be positive."))
                 return True
             type(self).radius = r
-            self._waiting_radius = False
-            self.prompt("Select first object:")
+            self._await = None
+            self._first_prompt()
+            return True
+        if self._await == "trim":
+            if t.startswith("T"):
+                trimmode.set_trimmode(True)
+            elif t.startswith("N"):
+                trimmode.set_trimmode(False)
+            elif text.strip():
+                self.ctx.echo(tr("Requires Trim or No trim."))
+                return True
+            self._await = None
+            self._first_prompt()
+            return True
+        if self._first is not None:
+            return False
+        if t in ("R", "RADIUS"):
+            self._await = "radius"
+            self.prompt("Specify fillet radius <{r}>:",
+                        r=self._fmt(type(self).radius))
+            return True
+        if t in ("T", "TRIM"):
+            self._await = "trim"
+            self.prompt("Enter Trim mode option [Trim/No trim] <{mode}>:",
+                        mode=tr("Trim") if trimmode.trimmode() else tr("No trim"))
+            return True
+        if t in ("M", "MULTIPLE"):
+            self._multiple = True
+            self._first_prompt()
+            return True
+        if t in ("P", "POLYLINE"):
+            self._await = "polyline"
+            self.prompt("Select 2D polyline:")
+            return True
+        if t in ("U", "UNDO"):
+            if self._done:
+                self.ctx.undo_last()
+                self._done -= 1
+            else:
+                self.ctx.echo(tr("Command has been completely undone."))
+            self._first_prompt()
             return True
         return False
 
+    def on_enter(self) -> None:
+        if self._await == "radius":
+            self.on_option("")
+            return
+        self.ctx.finish()
+
     def on_point(self, point: Point) -> None:
         entity = self.ctx.services.pick_entity(point)
+        if self._await == "polyline":
+            self._fillet_polyline(entity)
+            return
         if entity is None or entity.dxftype() not in ("LINE", "ARC", "CIRCLE"):
             self.ctx.echo(tr("FILLET joins lines, arcs and circles."))
             return
         if self._first is None:
             self._first = entity
             self._first_pick = point
-            self.prompt("Select second object:")
+            self.prompt("Select second object or shift-select to apply corner:")
             return
         if entity is self._first:
             self.ctx.echo(tr("Pick a different object."))
             return
-        if "LINE" != entity.dxftype() or "LINE" != self._first.dxftype():
-            self._fillet_curves(entity, point)
-            return
-        s1 = (self._first.dxf.start.x, self._first.dxf.start.y,
-              self._first.dxf.end.x, self._first.dxf.end.y)
+        # Shift on the second pick: a sharp corner, radius 0 this once
+        radius = 0.0 if getattr(self, "shift", False) else type(self).radius
+        if "LINE" == entity.dxftype() == self._first.dxftype():
+            done = self._fillet_lines(entity, point, radius)
+        else:
+            done = self._fillet_curves(entity, point, radius)
+        if done:
+            self._after_fillet()
+        else:
+            self._first_prompt() if self._multiple else self.ctx.finish()
+
+    # -- the pieces -------------------------------------------------------
+    def _run(self, olds, pieces, arc) -> None:
+        """Replace ``olds`` by the trimmed ``pieces`` plus the fillet ``arc``
+        (a factory or None). With TRIMMODE off the originals stay and only
+        the arc is added."""
+        from core import trimmode
+
+        if trimmode.trimmode():
+            factories = pieces + ([arc] if arc else [])
+        else:
+            olds, factories = [], ([arc] if arc else [])
+        if factories:
+            self.ctx.execute(actions.ReplaceEntitiesCommand(
+                "FILLET", olds, factories))
+
+    def _fillet_lines(self, entity, point, radius) -> bool:
+        from core.modify import common_style_source, inherit_style
+
+        first = self._first
+        s1 = (first.dxf.start.x, first.dxf.start.y,
+              first.dxf.end.x, first.dxf.end.y)
         s2 = (entity.dxf.start.x, entity.dxf.start.y,
               entity.dxf.end.x, entity.dxf.end.y)
-        r = type(self).radius
+        source = common_style_source([first, entity])
         parallel = editmath.fillet_parallel(s1, self._first_pick, s2)
         if parallel is not None:
-            # The first line stays; the second is trimmed to the semicircle.
-            new_s2, (center, radius, a0, a1) = parallel
-            from core.modify import common_style_source, inherit_style
-
-            source = common_style_source([self._first, entity])
-            self.ctx.execute(actions.ReplaceEntitiesCommand(
-                "FILLET", [entity],
-                [lambda msp, p=new_s2: inherit_style(
-                    msp.add_line((p[0], p[1]), (p[2], p[3])), entity),
-                 lambda msp: inherit_style(
-                    msp.add_arc(center, radius, a0, a1), source)]))
-            self.ctx.finish()
-            return
-        if r == 0:
+            # The first line stays; the second is trimmed to the semicircle
+            # (the radius is half the distance, whatever it is set to).
+            new_s2, (center, r, a0, a1) = parallel
+            self._run([entity],
+                      [lambda msp, p=new_s2: inherit_style(
+                          msp.add_line((p[0], p[1]), (p[2], p[3])), entity)],
+                      lambda msp: inherit_style(
+                          msp.add_arc(center, r, a0, a1), source))
+            return True
+        if radius == 0:
             result = editmath.fillet_corner(s1, s2)
             if result is None:
                 self.ctx.echo(tr("Lines are parallel."))
-                self.ctx.finish()
-                return
+                return False
             n1, n2 = result
-            factories = [
-                lambda msp, p=n1: msp.add_line((p[0], p[1]), (p[2], p[3])),
-                lambda msp, p=n2: msp.add_line((p[0], p[1]), (p[2], p[3])),
-            ]
+            arc = None
         else:
-            result = editmath.fillet_arc(s1, s2, r)
+            result = editmath.fillet_arc(s1, s2, radius)
             if result is None:
                 self.ctx.echo(tr("Radius does not fit."))
-                self.ctx.finish()
-                return
-            center, radius, a0, a1, t1, t2 = result
+                return False
+            center, r, a0, a1, t1, t2 = result
             corner = editmath.line_line_intersection(s1, s2, infinite2=True)[1]
 
             def far_piece(seg, tangent):
@@ -902,71 +1008,88 @@ class FilletTool(Tool):
                 far = (seg[0], seg[1]) if d_start >= d_end else (seg[2], seg[3])
                 return (far[0], far[1], tangent[0], tangent[1])
 
-            n1 = far_piece(s1, t1)
-            n2 = far_piece(s2, t2)
-            factories = [
-                lambda msp, p=n1: msp.add_line((p[0], p[1]), (p[2], p[3])),
-                lambda msp, p=n2: msp.add_line((p[0], p[1]), (p[2], p[3])),
-                lambda msp, c=center, rr=radius, s=a0, e=a1:
-                    msp.add_arc(c, rr, s, e),
-            ]
+            n1, n2 = far_piece(s1, t1), far_piece(s2, t2)
+            arc = (lambda msp, c=center, rr=r, s=a0, e=a1:
+                   inherit_style(msp.add_arc(c, rr, s, e), source))
         # The two trimmed pieces keep their own object's properties; the
         # new arc has no object of its own, so it takes them only when both
         # edges agree — otherwise the current settings decide.
-        from core.modify import common_style_source, inherit_style
+        self._run([first, entity],
+                  [lambda msp, p=n1: inherit_style(
+                      msp.add_line((p[0], p[1]), (p[2], p[3])), first),
+                   lambda msp, p=n2: inherit_style(
+                      msp.add_line((p[0], p[1]), (p[2], p[3])), entity)],
+                  arc)
+        return True
 
-        sources = [self._first, entity, common_style_source(
-            [self._first, entity])]
-        self.ctx.execute(actions.ReplaceEntitiesCommand(
-            "FILLET", [self._first, entity],
-            [(lambda msp, f=f, src=src: inherit_style(f(msp), src))
-             for f, src in zip(factories, sources)]))
-        self.ctx.finish()
-
-
-    def _fillet_curves(self, entity, pick) -> None:
-        """FILLET with an arc or a circle in the pair: the fillet arc is
-        tangent to both, the one whose ends are nearest the picks; lines and
-        arcs are trimmed or extended to it, circles are left whole
-        ("FILLET does not trim circles")."""
+    def _fillet_curves(self, entity, pick, radius) -> bool:
+        """An arc or a circle in the pair: the fillet arc is tangent to both,
+        the one whose ends are nearest the picks ("select the objects close
+        to where you want the endpoints of the fillet"); lines and arcs are
+        trimmed or extended to it, circles are left whole ("FILLET does not
+        trim circles")."""
         from core.modify import common_style_source, inherit_style
 
         pairs = [(self._first, self._first_pick), (entity, pick)]
         objs = [_tangent_obj(e) for e, _p in pairs]
-        radius = type(self).radius
         try:
             center, t1, t2 = actions.tangent_circle(
                 objs[0], pairs[0][1], objs[1], pairs[1][1], radius)
         except ValueError:
             self.ctx.echo(tr("Radius does not fit.") if radius > 0
                           else tr("The objects do not meet."))
-            self.ctx.finish()
-            return
-        olds, factories = [], []
+            return False
+        olds, pieces = [], []
         for (e, p), t in zip(pairs, (t1, t2)):
             kind = e.dxftype()
             if kind == "LINE":
                 seg = (e.dxf.start.x, e.dxf.start.y, e.dxf.end.x, e.dxf.end.y)
                 n = editmath.trim_line_to(seg, t, p)
-                factories.append(lambda msp, n=n, e=e: inherit_style(
+                pieces.append(lambda msp, n=n, e=e: inherit_style(
                     msp.add_line((n[0], n[1]), (n[2], n[3])), e))
             elif kind == "ARC":
                 cx, cy, r, a0, a1 = ocs.arc_wcs(e)
                 b0, b1 = editmath.trim_arc_to((cx, cy), a0, a1, t, p)
-                factories.append(lambda msp, c=(cx, cy), r=r, b0=b0, b1=b1,
-                                 e=e: inherit_style(msp.add_arc(c, r, b0, b1), e))
+                pieces.append(lambda msp, c=(cx, cy), r=r, b0=b0, b1=b1,
+                              e=e: inherit_style(msp.add_arc(c, r, b0, b1), e))
             else:
                 continue                      # a circle stays whole
             olds.append(e)
+        arc = None
         if radius > 0:
             a0, a1 = editmath.arc_between(center, t1, t2)
             source = common_style_source([self._first, entity])
-            factories.append(lambda msp: inherit_style(
+            arc = (lambda msp: inherit_style(
                 msp.add_arc(center, radius, a0, a1), source))
-        if factories:
+        self._run(olds, pieces, arc)
+        return True
+
+    def _fillet_polyline(self, entity) -> None:
+        """Polyline option: round every corner where two lines meet."""
+        self._await = None
+        if entity is None or entity.dxftype() != "LWPOLYLINE":
+            self.ctx.echo(tr("Object selected is not a 2D polyline."))
+            self._first_prompt()
+            return
+        rows, done, short = editmath.fillet_polyline(
+            entity.get_points("xyseb"), entity.closed, type(self).radius)
+        if done:
+            def factory(msp, e=entity, rows=rows):
+                clone = e.copy()
+                clone.set_points(rows, format="xyseb")
+                msp.add_entity(clone)
+                return clone
+
             self.ctx.execute(actions.ReplaceEntitiesCommand(
-                "FILLET", olds, factories))
-        self.ctx.finish()
+                "FILLET", [entity], [factory]))
+        message = tr("{n} lines were filleted", n=done)
+        if short:
+            message += ", " + tr("{n} were too short", n=short)
+        self.ctx.echo(message)
+        if done:
+            self._after_fillet()
+        else:
+            self._first_prompt() if self._multiple else self.ctx.finish()
 
 
 def _tangent_obj(entity):

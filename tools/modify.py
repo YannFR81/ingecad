@@ -18,7 +18,7 @@ Deliberate deviations, each a smaller menu rather than a different one:
 """
 from __future__ import annotations
 
-from core import actions, editmath, modify
+from core import actions, editmath, modify, trimmode
 from core.i18n import tr
 from tools.base import Point, Tool
 
@@ -179,7 +179,6 @@ class ChamferTool(Tool):
     entity_picker = True
     dist1 = 0.0        # session-sticky, like AutoCAD's
     dist2 = 0.0
-    trim = True
 
     def start(self) -> None:
         self.name = "CHAMFER"
@@ -189,7 +188,7 @@ class ChamferTool(Tool):
 
     def _announce(self) -> None:
         cls = type(self)
-        mode = tr("TRIM") if cls.trim else tr("NOTRIM")
+        mode = tr("TRIM") if trimmode.trimmode() else tr("NOTRIM")
         self.ctx.echo(tr("({mode} mode) Current chamfer Dist1 = {d1}, "
                          "Dist2 = {d2}", mode=mode,
                          d1=f"{cls.dist1:g}", d2=f"{cls.dist2:g}"))
@@ -222,9 +221,9 @@ class ChamferTool(Tool):
             return True
         if self._await == "trim":
             if token.startswith("T"):
-                cls.trim = True
+                trimmode.set_trimmode(True)
             elif token.startswith("N"):
-                cls.trim = False
+                trimmode.set_trimmode(False)
             else:
                 self.ctx.echo(tr("Requires Trim or No trim."))
                 return True
@@ -240,7 +239,7 @@ class ChamferTool(Tool):
             self._await = "trim"
             self.prompt("Enter Trim mode option [Trim/No trim] "
                         "<{mode}>:",
-                        mode=tr("Trim") if cls.trim else tr("No trim"))
+                        mode=tr("Trim") if trimmode.trimmode() else tr("No trim"))
             return True
         return False
 
@@ -274,7 +273,7 @@ class ChamferTool(Tool):
         new1, new2, bevel = pieces
         factories = [lambda msp, p=bevel: msp.add_line((p[0], p[1]),
                                                        (p[2], p[3]))]
-        if cls.trim:
+        if trimmode.trimmode():
             factories = [
                 lambda msp, p=new1: msp.add_line((p[0], p[1]), (p[2], p[3])),
                 lambda msp, p=new2: msp.add_line((p[0], p[1]), (p[2], p[3])),
