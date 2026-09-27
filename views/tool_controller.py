@@ -318,6 +318,9 @@ class ToolController(QObject):
         # Shift+right-click menu): the snaps for the NEXT point only, running
         # modes or not. None = no override; an empty set = no snap at all.
         self.osnap_override: Optional[frozenset] = None
+        # A point modifier in progress (FROM, M2P): its own points are
+        # collected here and ONE point reaches the tool at the end.
+        self._modifier: Optional[dict] = None
         self.ortho_on = False
         self.polar_on = False
         self.snap_on = False        # SNAP / F9: the cursor jumps by the grid
@@ -1011,6 +1014,7 @@ class ToolController(QObject):
         self.tool = None
         self.snap_hit = None
         self.osnap_override = None
+        self._modifier = None
         self.current_prompt = ""
         self._recent_points = []
         self.clear_tracking()
@@ -2028,6 +2032,14 @@ class ToolController(QObject):
                 self._window_anchor = (wx, wy)
                 self.changed.emit()
                 return
+        if self._modifier is not None:
+            point = self.resolved_point(wx, wy)
+            self._note_point(point)
+            final = self._modifier_take(point)
+            if final is not None:
+                self.tool.on_point(final)
+            self.changed.emit()
+            return
         tangent_pick = getattr(self.tool, "on_tangent_pick", None)
         if (tangent_pick is not None and self.osnap_override
                 and "TAN" in self.osnap_override):
@@ -2559,6 +2571,10 @@ class ToolController(QObject):
             if override is not None:
                 self.set_osnap_override(override, typed=True)
                 return True
+            modifier = osnap_modes.modifier_from_text(stripped)
+            if modifier is not None:
+                self.start_point_modifier(modifier)
+                return True
         if self.tool.on_option(stripped):
             self._preview_now()        # a Text/Angle/Horizontal option changes the picture
             self.changed.emit()
@@ -2566,6 +2582,12 @@ class ToolController(QObject):
         direction = None
         anchor = self.tool.last_point
         first_point = anchor is None
+        offset_from = (self._modifier.get("base")
+                       if self._modifier is not None
+                       and self._modifier["kind"] == "FROM" else None)
+        if offset_from is not None:
+            # FROM's <Offset>: relative to the base point just given
+            anchor, first_point = offset_from, True
         if first_point:
             # AutoCAD's LASTPOINT: before a command has a point of its own,
             # a direct distance and a relative @ are measured from the last
@@ -2593,9 +2615,49 @@ class ToolController(QObject):
             self.window.command_line.echo(tr("Invalid input."))
             return True
         self._note_point((point.x, point.y))
+        if self._modifier is not None:
+            final = self._modifier_take((point.x, point.y))
+            if final is None:
+                self.changed.emit()
+                return True
+            self.tool.on_point(final)
+            self.changed.emit()
+            return True
         self.tool.on_point((point.x, point.y))
         self.changed.emit()
         return True
+
+    # -- point modifiers (FROM, M2P) -------------------------------------------
+    def start_point_modifier(self, kind: str) -> None:
+        """FROM or M2P at a point prompt (typed, or from the snap menu)."""
+        if self.tool is None:
+            return
+        self._modifier = {"kind": kind}
+        self._on_prompt(tr("Base point:") if kind == "FROM"
+                        else tr("First point of mid:"))
+        self.changed.emit()
+
+    def _modifier_take(self, point):
+        """One point for the modifier in progress; the point for the tool
+        when it is complete, else None."""
+        m = self._modifier
+        if m["kind"] == "FROM":
+            if "base" not in m:
+                m["base"] = point
+                self._on_prompt(tr("<Offset>:"))
+                return None
+            self._modifier = None
+            # a typed @offset or distance is measured from the base; a
+            # click or an absolute coordinate cancels FROM (Command
+            # Reference) and is used as it is
+            return point
+        if "first" not in m:
+            m["first"] = point
+            self._on_prompt(tr("Second point of mid:"))
+            return None
+        self._modifier = None
+        a = m["first"]
+        return ((a[0] + point[0]) / 2.0, (a[1] + point[1]) / 2.0)
 
     # -- viewport painting hooks ----------------------------------------------
     def preview_segments(self):

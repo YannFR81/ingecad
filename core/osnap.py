@@ -143,3 +143,13 @@ def preposition(key: str) -> str:
 
 def command_form(key: str) -> str:
     return _COMMAND_FORM.get(key, "_" + key.lower())
+
+
+def modifier_from_text(text: str):
+    """FROM or M2P when a point prompt gets "from" / "mtp" / "m2p"."""
+    word = text.strip().upper().lstrip("_")
+    if word in ("FROM", "FRO"):
+        return "FROM"
+    if word in ("MTP", "M2P"):
+        return "M2P"
+    return None

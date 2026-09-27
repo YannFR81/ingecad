@@ -366,14 +366,25 @@ class MainWindow(QMainWindow):
         from core import osnap as osnap_modes
 
         menu = QMenu(self)
-        for mode in osnap_modes.MODES:
-            action = menu.addAction(tr(mode.label))
-            action.setEnabled(mode.available)
-            if not mode.available and mode.note:
-                action.setToolTip(tr(mode.note))
-            action.triggered.connect(
-                lambda _=False, k=mode.key: self.tools.set_osnap_override({k}))
-        menu.addSeparator()
+        # AutoCAD's Object Snap shortcut menu, in its order: the point
+        # modifiers, then the snaps in their groups, then None.
+        menu.addAction(tr("From"),
+                       lambda: self.tools.start_point_modifier("FROM"))
+        menu.addAction(tr("Mid Between 2 Points"),
+                       lambda: self.tools.start_point_modifier("M2P"))
+        groups = (("END", "MID", "INT", "APP", "EXT"),
+                  ("CEN", "GCE", "QUA", "TAN"),
+                  ("PER", "PAR", "NOD", "INS", "NEA", "ORI"))
+        for group in groups:
+            menu.addSeparator()
+            for key in group:
+                mode = osnap_modes.BY_KEY[key]
+                action = menu.addAction(tr(mode.label))
+                action.setEnabled(mode.available)
+                if not mode.available and mode.note:
+                    action.setToolTip(tr(mode.note))
+                action.triggered.connect(
+                    lambda _=False, k=key: self.tools.set_osnap_override({k}))
         menu.addAction(tr("None"),
                        lambda: self.tools.set_osnap_override(()))
         menu.addSeparator()

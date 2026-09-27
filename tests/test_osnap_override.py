@@ -300,3 +300,78 @@ def test_circle_3p_with_typed_tangents_is_tan_tan_tan(qapp):
         tools.cancel()
         win.document.dirty = False
         win.close()
+
+
+def _line_with(win, *inputs):
+    win._on_command_submitted("LINE")
+    for text in inputs:
+        win._on_command_submitted(text)
+    return win.tools.tool
+
+
+def test_from_offsets_the_next_point_from_a_base(qapp):
+    """FROM (Command Modifier): Base point, then <Offset>."""
+    import pytest
+
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    prompts = []
+    real = win.tools._on_prompt
+    win.tools._on_prompt = lambda text: (prompts.append(text), real(text))
+    try:
+        tool = _line_with(win, "FROM")
+        assert prompts[-1] == "Base point:"
+        win._on_command_submitted("10,10")
+        assert prompts[-1] == "<Offset>:"
+        win._on_command_submitted("@5,0")
+        assert tool.last_point == pytest.approx((15, 10))
+        # an absolute coordinate at <Offset> cancels FROM and is used as is
+        win._on_command_submitted("FROM")
+        win._on_command_submitted("100,100")
+        win._on_command_submitted("3,4")
+        assert tool.last_point == pytest.approx((3, 4))
+    finally:
+        win.tools.cancel()
+        win.document.dirty = False
+        win.close()
+
+
+def test_m2p_takes_the_midpoint_of_two_points(qapp):
+    import pytest
+
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    prompts = []
+    real = win.tools._on_prompt
+    win.tools._on_prompt = lambda text: (prompts.append(text), real(text))
+    try:
+        tool = _line_with(win, "M2P")
+        assert prompts[-1] == "First point of mid:"
+        win._on_command_submitted("0,0")
+        assert prompts[-1] == "Second point of mid:"
+        win.tools.on_click(10, 20)                # a pick works as well
+        assert tool.last_point == pytest.approx((5, 10))
+    finally:
+        win.tools.cancel()
+        win.document.dirty = False
+        win.close()
+
+
+def test_snap_menu_is_in_autocads_order(qapp):
+    win = _window(qapp)
+    try:
+        win._on_command_submitted("LINE")
+        menu = win.osnap_override_menu()
+        labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+        assert labels[:3] == ["From", "Mid Between 2 Points", "Endpoint"]
+        assert labels.index("Intersection") < labels.index("Center") \
+            < labels.index("Tangent") < labels.index("Perpendicular") \
+            < labels.index("Nearest") < labels.index("None")
+    finally:
+        win.tools.cancel()
+        win.document.dirty = False
+        win.close()
