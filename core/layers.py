@@ -367,6 +367,50 @@ def snap_lineweight(value_mm: float) -> int:
                key=lambda w: abs(w - target))
 
 
+def make_current(document, name: str, *, execute, echo) -> bool:
+    """Make ``name`` the current layer, as -LAYER Set and CLAYER do.
+
+    Refuses a layer that does not exist or is frozen; an off layer is
+    turned back on first. Returns whether the current layer changed.
+    """
+    if name not in document.doc.layers:
+        echo(tr('Cannot find layer "{name}".', name=name))
+        return False
+    layer = document.doc.layers.get(name)
+    if layer.is_frozen():
+        echo(tr("Cannot make a frozen layer current."))
+        return False
+    if not layer.is_on():
+        execute([LayerPropertyCommand(name, "on", True)])
+    set_current_layer(document, name)
+    return True
+
+
+def clayer_command(document, history, *, echo, refresh, args=()):
+    """CLAYER: show the current layer and set a new one by name.
+
+    ``CLAYER MUROS`` answers on the same line; bare ``CLAYER`` asks,
+    with the current layer as the default (Enter keeps it).
+    """
+    from core.actions import Prompt
+
+    def execute(commands) -> None:
+        for command in commands:
+            history.execute(command)
+
+    def on_value(text: str) -> None:
+        name = text.strip().strip('"')
+        if not name or name == current_layer_name(document):
+            return
+        if make_current(document, name, execute=execute, echo=echo):
+            refresh()
+
+    if args and str(args[0]).strip():
+        return on_value(" ".join(str(a) for a in args))
+    return Prompt(tr('Enter new value for CLAYER <"{name}">:',
+                     name=current_layer_name(document)), on_value)
+
+
 def layer_command(document, history, *, echo, refresh, args=()):
     """The -LAYER command: official keywords and prompt loop.
 
@@ -432,17 +476,8 @@ def layer_command(document, history, *, echo, refresh, args=()):
 
     def on_set(text: str):
         name = text.strip() or current_layer_name(document)
-        if name not in document.doc.layers:
-            echo(tr('Cannot find layer "{name}".', name=name))
-            return loop()
-        layer = document.doc.layers.get(name)
-        if layer.is_frozen():
-            echo(tr("Cannot make a frozen layer current."))
-            return loop()
-        if not layer.is_on():
-            execute([LayerPropertyCommand(name, "on", True)])
-        set_current_layer(document, name)
-        refresh()
+        if make_current(document, name, execute=execute, echo=echo):
+            refresh()
         return loop()
 
     def on_new(text: str):

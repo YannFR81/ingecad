@@ -176,3 +176,51 @@ def test_recent_commands_dedup(qapp):
     for text in ("L", "L", "C", "Z E", "L"):
         cl.input._history.append(text)
     assert cl.recent_commands() == ["L", "Z", "C"]
+
+
+# -- CLAYER (#24): the current layer typed by name --------------------------
+
+def _window_with_layers(qapp):
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    for name in ("MUROS", "EJES", "CONGELADA"):
+        win.document.doc.layers.add(name)
+    win.document.doc.layers.get("CONGELADA").freeze()
+    win._refresh_props_toolbar()
+    return win
+
+
+
+def test_clayer_sets_the_current_layer_and_the_combo_follows(qapp):
+    win = _window_with_layers(qapp)
+    try:
+        win.dispatcher.submit("CLAYER MUROS")          # value on the same line
+        assert layer_ops.current_layer_name(win.document) == "MUROS"
+        assert win._layer_combo.currentText() == "MUROS"
+        win.dispatcher.submit("CLAYER")                 # or at the prompt
+        win.dispatcher.submit("EJES")
+        assert layer_ops.current_layer_name(win.document) == "EJES"
+        assert win._layer_combo.currentText() == "EJES"
+    finally:
+        win.document.dirty = False
+        win.close()
+
+
+def test_clayer_refuses_a_missing_or_frozen_layer(qapp):
+    win = _window_with_layers(qapp)
+    try:
+        echoes = []
+        real_echo = win.command_line.echo
+        win.command_line.echo = lambda text, *a, **k: (echoes.append(text),
+                                                       real_echo(text, *a, **k))
+        win.dispatcher.submit("CLAYER NOEXISTE")
+        assert layer_ops.current_layer_name(win.document) == "0"
+        assert any("NOEXISTE" in e for e in echoes)
+        win.dispatcher.submit("CLAYER CONGELADA")
+        assert layer_ops.current_layer_name(win.document) == "0"
+        assert any("frozen" in e.lower() for e in echoes)
+    finally:
+        win.document.dirty = False
+        win.close()

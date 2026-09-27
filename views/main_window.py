@@ -2775,6 +2775,7 @@ class MainWindow(QMainWindow):
         d.register("STYLE", lambda *a: self.toggle_styles_panel())
         d.register("DIMSTYLE", lambda *a: self._open_dimstyle_manager())
         d.register("-LAYER", self._cmd_layer_cli)
+        d.register("CLAYER", self._cmd_clayer)
         d.register("COPYCLIP", lambda *a: self._cmd_copy())
         d.register("CUTCLIP", lambda *a: self._cmd_cut())
         d.register("PASTECLIP", lambda *a: self._cmd_paste())
@@ -3380,6 +3381,23 @@ class MainWindow(QMainWindow):
             refresh=self._sync_layout_tabs,
             current=lambda: self._active_layout,
             args=args)
+
+    def _cmd_clayer(self, *args) -> Prompt | None:
+        """CLAYER — the current layer, typed by name (#24)."""
+        if self.document is None:
+            self.new_document()
+        from core import layers as layer_ops
+
+        def refresh() -> None:
+            if self._layers_panel is not None:
+                self._layers_panel.refresh()
+            self._refresh_props_toolbar()
+            self.regen_in_memory()
+            self.viewport.update()
+
+        return layer_ops.clayer_command(
+            self.document, self.history, echo=self.command_line.echo,
+            refresh=refresh, args=args)
 
     def _cmd_layer_cli(self, *args) -> Prompt | None:
         """-LAYER — the command-line layer flow (official keywords)."""
