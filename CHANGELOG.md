@@ -31,6 +31,12 @@
   pyproj (≈34 MB) now ships in every package; `--check` proves it converts.
 
 ### Fixes
+- **Ctrl+S on a big plan no longer freezes the window.** Save as DWG ran on
+  the interface thread: on Plaza Yanque (10 000 objects) the window froze
+  for 10 s. The save now runs in the background while the window keeps
+  drawing (keyboard and mouse wait, as in AutoCAD), and its check reads the
+  file as a stream instead of loading the plan twice: 14 s → 7.7 s, and the
+  longest pause during the save is 0.02 s. Found by the new release bench.
 - **The grid no longer flickers when zooming or panning.** The frame that
   rebuilt the grid (the first after F7, a wheel notch or a pan across a
   cell) drew it, and the red/green axes, with no shader program bound, so

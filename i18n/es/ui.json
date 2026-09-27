@@ -1478,5 +1478,6 @@
   "Select an object on the layer to be locked:": "Designe un objeto de la capa que se va a bloquear:",
   "Select an object on the layer to be unlocked:": "Designe un objeto de la capa que se va a desbloquear:",
   "thaw all layers": "reutilizar todas las capas",
-  "Thaw All Layers": "Reutilizar todas las capas"
+  "Thaw All Layers": "Reutilizar todas las capas",
+  "Saving {name}...": "Guardando {name}..."
 }

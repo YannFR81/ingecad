@@ -174,24 +174,48 @@ class Document:
         warnings is a list of human-readable strings from the verified save
         (empty when the DWG checked out clean). DXF saves never warn.
         """
-        path = Path(path)
-        warnings: list[str] = []
-        if path.suffix.lower() == ".dwg":
-            from core.encoding import write_dwg_intermediate
-            from formats.dwg_bridge import dwg_write_engine, write_dwg
-
-            engine = dwg_write_engine(version) or "libredwg"
-            with tempfile.TemporaryDirectory(prefix="ingecad-save-") as tmp:
-                tmp_dxf = Path(tmp) / "out.dxf"
-                write_dwg_intermediate(self.doc, tmp_dxf)
-                warnings = write_dwg(tmp_dxf, path, version)
-            warnings += _annotative_save_warnings(self.doc)
-        else:
-            self.doc.saveas(path)
-            engine = "dxf"
-        self.path = path
-        self.dirty = False
+        engine, warnings = self.prepare_save(path, version)()
+        self.saved_to(path)
         return engine, warnings
+
+    def prepare_save(self, path: Path, version: str = "r2000"):
+        """The part of a save that READS the drawing, done now, on the
+        calling thread; returns ``finish()``, the part that only works on
+        files -- LibreDWG's conversion and the verification, 7 of the 10
+        seconds a big plan takes -- safe to run on a worker thread. It
+        returns ``(engine, warnings)`` like :meth:`save_as`; call
+        :meth:`saved_to` once it has succeeded."""
+        path = Path(path)
+        if path.suffix.lower() != ".dwg":
+            self.doc.saveas(path)
+            return lambda: ("dxf", [])
+        import shutil
+
+        from core.encoding import write_dwg_intermediate
+        from formats.dwg_bridge import dwg_write_engine, write_dwg
+
+        engine = dwg_write_engine(version) or "libredwg"
+        tmp = Path(tempfile.mkdtemp(prefix="ingecad-save-"))
+        tmp_dxf = tmp / "out.dxf"
+        try:
+            write_dwg_intermediate(self.doc, tmp_dxf)
+            annotative = _annotative_save_warnings(self.doc)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+
+        def finish():
+            try:
+                return engine, write_dwg(tmp_dxf, path, version) + annotative
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        return finish
+
+    def saved_to(self, path: Path) -> None:
+        """The drawing now lives in ``path``, as saved."""
+        self.path = Path(path)
+        self.dirty = False
 
 
 def _annotative_save_warnings(doc) -> list[str]:

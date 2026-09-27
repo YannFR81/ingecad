@@ -14,6 +14,7 @@ from PySide6.QtCore import (QEvent, QObject, QPoint, QSettings, Qt,
                             QThread, QTimer, Signal)
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QLabel,
     QMainWindow,
@@ -158,6 +159,30 @@ class _AutoSaveWorker(QThread):
         self.done.emit(True, str(self._sv))
 
 
+class _SaveWorker(QThread):
+    """A save, off the UI thread: the intermediate DXF ezdxf writes (2 s on
+    Plaza Yanque, 10 000 objects), LibreDWG's conversion and the check that
+    reads the result back (7.7 s) -- the ~10 s Ctrl+S used to freeze the
+    window for. It only READS the drawing, and nothing can change the
+    drawing meanwhile: the window holds keyboard and mouse until it ends."""
+
+    def __init__(self, finish) -> None:
+        super().__init__()
+        self.setObjectName("save")
+        self._finish = finish
+        self.result = None
+        self.error = None            # the exception, if it failed
+
+    def run(self) -> None:
+        from core import gc_guard
+
+        with gc_guard.paused():      # never collect Qt garbage off the GUI thread
+            try:
+                self.result = self._finish()
+            except Exception as exc:  # noqa: BLE001 - reported on the GUI thread
+                self.error = exc
+
+
 class MainWindow(QMainWindow):
     # A live viewport regen must fit a frame-ish budget or pan blocks the UI.
     _VP_LIVE_BUDGET_MS = 33.0
@@ -236,6 +261,7 @@ class MainWindow(QMainWindow):
         # first changed and is reset by a real save, exactly as AutoCAD
         # documents it. The write itself runs on a worker.
         self._autosave_worker = None
+        self._save_worker = None
         #: When the drawing last changed. The automatic save waits for a
         #: pause, so the one moment it can make the app wait -- an edit
         #: landing while the file is being written -- almost never arrives.
@@ -896,7 +922,16 @@ class MainWindow(QMainWindow):
 
         PrintDialog(self).exec()
 
+    #: What a save holds back while it runs (see _save_off_the_ui_thread).
+    _HELD_DURING_SAVE = frozenset((
+        QEvent.KeyPress, QEvent.KeyRelease, QEvent.ShortcutOverride,
+        QEvent.Shortcut, QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+        QEvent.MouseButtonDblClick, QEvent.Wheel, QEvent.Drop))
+
     def eventFilter(self, obj, event) -> bool:
+        if (getattr(self, "_save_worker", None) is not None
+                and event.type() in self._HELD_DURING_SAVE):
+            return True
         # The sidebar handle rides the drawing's right edge.
         if (event.type() in (QEvent.Resize, QEvent.Move, QEvent.Show)
                 and obj is getattr(self, "viewport", None)):
@@ -4462,6 +4497,8 @@ class MainWindow(QMainWindow):
             return False
         if self._autosave_worker is not None:
             return False
+        if self._save_worker is not None:
+            return False        # the drawing is being saved for real
         # A regen does NOT stand in the way: it reads the document, and so
         # does the autosave -- two readers. Waiting for it was measured to
         # mean "almost never save", because on a real plan a regen is in
@@ -4538,6 +4575,9 @@ class MainWindow(QMainWindow):
         autosave.discard(*autosave.autosave_paths(self.document.path))
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if getattr(self, "_save_worker", None) is not None:
+            event.ignore()             # the window closes after the save
+            return
         if not self.maybe_save_changes():
             event.ignore()
             return
@@ -4555,6 +4595,9 @@ class MainWindow(QMainWindow):
         the app with a regen in flight was a guaranteed SIGABRT on exit.
         The results are not wanted any more, only the joins.
         """
+        saving = getattr(self, "_save_worker", None)
+        if saving is not None:
+            saving.wait()
         worker = self._regen_worker
         if worker is not None:
             self._regen_worker = None
@@ -4587,13 +4630,43 @@ class MainWindow(QMainWindow):
                 for w in list(getattr(tools, attr, ()) or ()):
                     w.wait()
 
+    def _save_off_the_ui_thread(self, path: Path, version: str):
+        """Save, keeping the window alive: the whole save runs on a
+        _SaveWorker while a local event loop keeps painting. Keyboard and
+        mouse are held until it ends (eventFilter), as AutoCAD holds them
+        while it saves -- nothing can edit, open or close the drawing
+        halfway through, which is also what lets the worker read it.
+        Returns (engine, warnings)."""
+        from PySide6.QtCore import QEventLoop
+
+        document = self.document
+        worker = _SaveWorker(lambda: document.prepare_save(path, version)())
+        loop = QEventLoop()
+        worker.finished.connect(loop.quit)
+        self._save_worker = worker
+        self.command_line.echo(tr("Saving {name}...", name=path.name))
+        QApplication.setOverrideCursor(Qt.BusyCursor)
+        try:
+            worker.start()
+            if not worker.isFinished():
+                loop.exec()
+            worker.wait()
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._save_worker = None
+        if worker.error is not None:
+            raise worker.error
+        return worker.result
+
     def _write_document(self, path: Path, version: str = "r2000") -> bool:
         """The shared tail of SAVE and SAVEAS: write, report, warn."""
         if self.document is None:
             return False
+        if self._save_worker is not None:
+            return False           # one save at a time (input is held meanwhile)
         self._autosave_gate()      # never write while the .sv$ is being made
         try:
-            engine, warnings = self.document.save_as(path, version)
+            engine, warnings = self._save_off_the_ui_thread(path, version)
         except Exception as exc:
             QMessageBox.warning(
                 self,
@@ -4601,6 +4674,7 @@ class MainWindow(QMainWindow):
                 tr("Cannot save {name}: {error}", name=path.name, error=str(exc)),
             )
             return False
+        self.document.saved_to(path)
         from core import recent as recent_mod
 
         recent_mod.add(path)

@@ -78,6 +78,8 @@ def run_one(src: Path, out: Path, tree: str) -> dict:
     win.resize(1400, 900)
     win.show()
     win.maybe_save_changes = lambda: True
+    from PySide6.QtWidgets import QMessageBox
+    QMessageBox.warning = staticmethod(lambda *a, **k: None)   # modal: would hang
     tc, vp = win.tools, win.viewport
 
     gap = {"last": None, "worst": 0.0}
@@ -112,10 +114,12 @@ def run_one(src: Path, out: Path, tree: str) -> dict:
         gap["last"], gap["worst"] = time.monotonic(), 0.0
         try:
             fn()
-            call = time.monotonic() - t
             settle()
+            # the timer's worst gap alone: a call that blocks shows up as
+            # the gap to the first tick after it, and a call that keeps the
+            # loop turning (Ctrl+S's local loop) is not a freeze
             res[key] = {"total": round(time.monotonic() - t, 2),
-                        "freeze": round(max(call, gap["worst"]), 2)}
+                        "freeze": round(gap["worst"], 2)}
         except Exception as exc:  # noqa: BLE001 - a failure IS a result
             res[key] = f"FAIL {type(exc).__name__}: {str(exc)[:80]}"
             settle()
@@ -206,7 +210,8 @@ def run_one(src: Path, out: Path, tree: str) -> dict:
     timed("move", lambda: tc._execute(actions.move_entities(some, 5.0, 5.0)))
     timed("undo_move", win._cmd_undo)
     folder = Path(tempfile.mkdtemp(dir=os.environ.get("TMPDIR")))
-    timed("save_dwg", lambda: win.document.save_as(folder / "bench.dwg", "r2000"))
+    # the window's own path, as Ctrl+S takes it (warnings are non-modal)
+    timed("save_dwg", lambda: win._write_document(folder / "bench.dwg", "r2000"))
 
     with open(out, "a") as fh:
         fh.write(json.dumps(res) + "\n")

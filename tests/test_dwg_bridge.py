@@ -118,7 +118,7 @@ def test_verify_dwg_clean_when_counts_match(tmp_path, monkeypatch):
     # Verified save: source and re-read agree, no writer errors -> no warning.
     src = _dxf_with(5, tmp_path / "src.dxf")
     back = _dxf_with(5, tmp_path / "back.dxf")
-    monkeypatch.setattr(dwg_bridge, "dwg_to_dxf", lambda p: back)
+    monkeypatch.setattr(dwg_bridge, "_convert_dwg", lambda p: back)
     assert dwg_bridge.verify_dwg(src, tmp_path / "out.dwg", stderr="") == []
 
 
@@ -126,7 +126,7 @@ def test_verify_dwg_flags_dropped_entities(tmp_path, monkeypatch):
     # A DWG that lost geometry on the way out must warn the user.
     src = _dxf_with(10, tmp_path / "src.dxf")
     back = _dxf_with(6, tmp_path / "back.dxf")
-    monkeypatch.setattr(dwg_bridge, "dwg_to_dxf", lambda p: back)
+    monkeypatch.setattr(dwg_bridge, "_convert_dwg", lambda p: back)
     warnings = dwg_bridge.verify_dwg(src, tmp_path / "out.dwg", stderr="")
     assert warnings and any("did not survive" in w for w in warnings)
 
@@ -134,7 +134,7 @@ def test_verify_dwg_flags_dropped_entities(tmp_path, monkeypatch):
 def test_verify_dwg_flags_real_converter_error(tmp_path, monkeypatch):
     src = _dxf_with(3, tmp_path / "src.dxf")
     back = _dxf_with(3, tmp_path / "back.dxf")
-    monkeypatch.setattr(dwg_bridge, "dwg_to_dxf", lambda p: back)
+    monkeypatch.setattr(dwg_bridge, "_convert_dwg", lambda p: back)
     stderr = "ERROR: HATCH no paths[0].segs\nSomething improperly read\n"
     warnings = dwg_bridge.verify_dwg(src, tmp_path / "out.dwg", stderr=stderr)
     assert any("internal errors" in w for w in warnings)
@@ -144,7 +144,7 @@ def test_verify_dwg_ignores_duplicate_handle_noise(tmp_path, monkeypatch):
     # "Duplicate handle" is logged even for files that open fine -> not a verdict.
     src = _dxf_with(3, tmp_path / "src.dxf")
     back = _dxf_with(3, tmp_path / "back.dxf")
-    monkeypatch.setattr(dwg_bridge, "dwg_to_dxf", lambda p: back)
+    monkeypatch.setattr(dwg_bridge, "_convert_dwg", lambda p: back)
     stderr = "ERROR: Duplicate handle B for object 72 already points to object 48\n"
     assert dwg_bridge.verify_dwg(src, tmp_path / "out.dwg", stderr=stderr) == []
 
@@ -153,7 +153,7 @@ def test_verify_dwg_flags_unreadable_output(tmp_path, monkeypatch):
     src = _dxf_with(3, tmp_path / "src.dxf")
     def _boom(_p):
         raise dwg_bridge.DwgBridgeError("cannot read")
-    monkeypatch.setattr(dwg_bridge, "dwg_to_dxf", _boom)
+    monkeypatch.setattr(dwg_bridge, "_convert_dwg", _boom)
     warnings = dwg_bridge.verify_dwg(src, tmp_path / "out.dwg", stderr="")
     assert any("could not re-open" in w for w in warnings)
 
@@ -293,3 +293,21 @@ def test_without_libredwg_there_is_no_dwg_support(tmp_path, monkeypatch):
         dwg_bridge.dxf_to_dwg(dxf, tmp_path / "out.dwg")
     assert [n for n, _p in dwg_bridge.converters_status()] == [
         "LibreDWG dwg2dxf", "LibreDWG dxf2dwg"]
+
+
+def test_the_quick_count_agrees_with_ezdxf_on_what_counts(tmp_path):
+    """The verification counts without building the document: polyline
+    vertices and block attributes belong to their owner, paper space is
+    not model space -- what len(doc.modelspace()) says."""
+    doc = ezdxf.new("R2000")
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (1, 1))
+    msp.add_polyline2d([(0, 0), (1, 0), (1, 1), (0, 1)])       # + VERTEX, SEQEND
+    block = doc.blocks.new("TAG")
+    block.add_attdef("N", (0, 0))
+    msp.add_blockref("TAG", (5, 5)).add_auto_attribs({"N": "1"})   # + ATTRIB, SEQEND
+    msp.add_text("modelo")
+    doc.layout("Layout1").add_circle((0, 0), 3)               # paper space
+    path = tmp_path / "count.dxf"
+    doc.saveas(path)
+    assert dwg_bridge._modelspace_count(path) == len(ezdxf.readfile(path).modelspace()) == 4
