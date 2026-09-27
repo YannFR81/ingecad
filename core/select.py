@@ -33,6 +33,8 @@ import numpy as np
 
 from ezdxf import bbox as ezbbox
 
+from core import ocs
+
 # Types ezdxf can turn into a Path, which we flatten into pick segments.
 PATH_TYPES = frozenset(
     {"ELLIPSE", "SPLINE", "POLYLINE", "SOLID", "TRACE", "3DFACE", "HELIX"})
@@ -57,6 +59,16 @@ MAX_CURVE_SEGMENTS = 512
 # any real drawing (1000 km), short enough to keep float64 arithmetic exact
 # next to UTM coordinates.
 CONSTRUCTION_REACH = 1.0e6
+
+
+def _arc_record(e) -> tuple:
+    """An ARC as the index stores it: (cx, cy, r, 1.0, a0, a1), WCS radians."""
+    cx, cy, r, d0, d1 = ocs.arc_wcs(e)
+    a0 = math.radians(d0) % math.tau
+    a1 = math.radians(d1) % math.tau
+    if a1 <= a0:
+        a1 += math.tau
+    return (cx, cy, r, 1.0, a0, a1)
 
 
 def flatten_points(entity, max_segments: int = MAX_CURVE_SEGMENTS):
@@ -169,6 +181,17 @@ class GeometryIndex:
                 s, w = e.dxf.start, e.dxf.end
                 segs.append((s.x, s.y, w.x, w.y))
                 seg_o.append(oid)
+            elif t in ("LWPOLYLINE", "CIRCLE", "ARC") \
+                    and not ocs.is_planar(e):
+                # A tilted extrusion is no circle in plan: trace it the
+                # way the renderer does, OCS and all.
+                points = flatten_points(e)
+                if points:
+                    for a, b in zip(points, points[1:]):
+                        segs.append((a[0], a[1], b[0], b[1]))
+                        seg_o.append(oid)
+                else:
+                    GeometryIndex._box(e, oid, boxes, box_o)
             elif t == "LWPOLYLINE":
                 if any(p[4] for p in e.get_points("xyseb")):
                     # Arc segments: trace the arcs. Picking a curved lot
@@ -178,7 +201,7 @@ class GeometryIndex:
                         (p[0], p[1]) for p in e.get_points("xy")]
                     pairs = list(zip(pts, pts[1:]))
                 else:
-                    pts = e.get_points("xy")
+                    pts = ocs.points_wcs(e, e.get_points("xy"))
                     pairs = list(zip(pts, pts[1:]))
                     if e.closed and len(pts) > 2:
                         pairs.append((pts[-1], pts[0]))
@@ -186,16 +209,11 @@ class GeometryIndex:
                     segs.append((a[0], a[1], b[0], b[1]))
                     seg_o.append(oid)
             elif t == "CIRCLE":
-                c = e.dxf.center
-                circles.append((c.x, c.y, e.dxf.radius, 0.0, 0.0, math.tau))
+                cx, cy, r = ocs.circle_wcs(e)
+                circles.append((cx, cy, r, 0.0, 0.0, math.tau))
                 circle_o.append(oid)
             elif t == "ARC":
-                c = e.dxf.center
-                a0 = math.radians(e.dxf.start_angle) % math.tau
-                a1 = math.radians(e.dxf.end_angle) % math.tau
-                if a1 <= a0:
-                    a1 += math.tau
-                circles.append((c.x, c.y, e.dxf.radius, 1.0, a0, a1))
+                circles.append(_arc_record(e))
                 circle_o.append(oid)
             elif t == "POINT":
                 l = e.dxf.location
@@ -352,20 +370,14 @@ class GeometryIndex:
                 s, w = child.dxf.start, child.dxf.end
                 segs.append((s.x, s.y, w.x, w.y))
                 seg_o.append(oid)
-            elif kind == "ARC":
-                c = child.dxf.center
-                a0 = math.radians(child.dxf.start_angle) % math.tau
-                a1 = math.radians(child.dxf.end_angle) % math.tau
-                if a1 <= a0:
-                    a1 += math.tau
-                circles.append((c.x, c.y, child.dxf.radius, 1.0, a0, a1))
+            elif kind == "ARC" and ocs.is_planar(child):
+                circles.append(_arc_record(child))
                 circle_o.append(oid)
-            elif kind == "CIRCLE":
-                c = child.dxf.center
-                circles.append(
-                    (c.x, c.y, child.dxf.radius, 0.0, 0.0, math.tau))
+            elif kind == "CIRCLE" and ocs.is_planar(child):
+                cx, cy, r = ocs.circle_wcs(child)
+                circles.append((cx, cy, r, 0.0, 0.0, math.tau))
                 circle_o.append(oid)
-            elif kind in ("LWPOLYLINE", "SOLID", "TRACE", "3DFACE", "SPLINE",
+            elif kind in ("ARC", "CIRCLE", "LWPOLYLINE", "SOLID", "TRACE", "3DFACE", "SPLINE",
                           "ELLIPSE", "POLYLINE"):
                 points = flatten_points(child)
                 if points:
@@ -832,9 +844,11 @@ class GeometryIndex:
             present[self._seg_oidx] = True
             bad[self._seg_oidx[~ins]] = True
         if len(self._circles):
-            c = self._circles
-            ins = ((c[:, 0] - c[:, 2] >= x0) & (c[:, 0] + c[:, 2] <= x1)
-                   & (c[:, 1] - c[:, 2] >= y0) & (c[:, 1] + c[:, 2] <= y1))
+            # An arc is inside when ITS extent is, not its whole circle's:
+            # a quarter arc drawn well inside the window used to be left out.
+            b = _circle_bounds(self._circles)
+            ins = ((b[:, 0] >= x0) & (b[:, 2] <= x1)
+                   & (b[:, 1] >= y0) & (b[:, 3] <= y1))
             present[self._circle_oidx] = True
             bad[self._circle_oidx[~ins]] = True
         if len(self._boxes):
@@ -879,6 +893,10 @@ class GeometryIndex:
             center_in = ((c[:, 0] >= x0) & (c[:, 0] <= x1)
                          & (c[:, 1] >= y0) & (c[:, 1] <= y1))
             hit = near & ~(corners_in & ~center_in)
+            # The circle test is only a filter for arcs: the rect may touch
+            # the part of the circle the arc doesn't have (issue #17).
+            for i in np.nonzero(hit & (c[:, 3] != 0.0))[0]:
+                hit[i] = _arc_touches_rect(c[i], x0, y0, x1, y1)
             touched[self._circle_oidx[hit]] = True
         if len(self._boxes):
             b = self._boxes
@@ -904,10 +922,11 @@ class GeometryIndex:
             max_y = max(max_y, segs[:, (1, 3)].max())
         circles = self.circles_of(wanted)
         if len(circles):
-            min_x = min(min_x, (circles[:, 0] - circles[:, 2]).min())
-            max_x = max(max_x, (circles[:, 0] + circles[:, 2]).max())
-            min_y = min(min_y, (circles[:, 1] - circles[:, 2]).min())
-            max_y = max(max_y, (circles[:, 1] + circles[:, 2]).max())
+            b = _circle_bounds(circles)
+            min_x = min(min_x, b[:, 0].min())
+            min_y = min(min_y, b[:, 1].min())
+            max_x = max(max_x, b[:, 2].max())
+            max_y = max(max_y, b[:, 3].max())
         boxes = self.boxes_of(wanted)
         if len(boxes):
             min_x = min(min_x, boxes[:, 0].min())
@@ -983,6 +1002,59 @@ def _segments_cross(s1, s2) -> bool:
     t = ((x3 - x1) * (y4 - y3) - (y3 - y1) * (x4 - x3)) / d
     u = ((x3 - x1) * (y2 - y1) - (y3 - y1) * (x2 - x1)) / d
     return 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0
+
+
+def _on_span(row, angle: float) -> bool:
+    """Is ``angle`` (radians) on the circle/arc row (cx, cy, r, is_arc, a0, a1)?"""
+    if row[3] == 0.0:
+        return True
+    return (angle - row[4]) % math.tau <= (row[5] - row[4]) + 1e-12
+
+
+def _circle_bounds(c: np.ndarray) -> np.ndarray:
+    """(min_x, min_y, max_x, max_y) of each circle/arc row, arcs exactly:
+    their two ends plus whichever of the four axis extremes they sweep."""
+    out = np.column_stack((c[:, 0] - c[:, 2], c[:, 1] - c[:, 2],
+                           c[:, 0] + c[:, 2], c[:, 1] + c[:, 2]))
+    for i in np.nonzero(c[:, 3] != 0.0)[0]:
+        cx, cy, r, _, a0, a1 = c[i]
+        xs = [cx + r * math.cos(a0), cx + r * math.cos(a1)]
+        ys = [cy + r * math.sin(a0), cy + r * math.sin(a1)]
+        for k in range(4):
+            angle = k * math.pi / 2.0
+            if _on_span(c[i], angle):
+                xs.append(cx + r * math.cos(angle))
+                ys.append(cy + r * math.sin(angle))
+        out[i] = (min(xs), min(ys), max(xs), max(ys))
+    return out
+
+
+def _arc_touches_rect(row, x0, y0, x1, y1) -> bool:
+    """Exact crossing test for an ARC row: an end inside the rect, or the
+    arc itself crossing one of its edges."""
+    cx, cy, r, _, a0, a1 = row
+    for angle in (a0, a1):
+        px, py = cx + r * math.cos(angle), cy + r * math.sin(angle)
+        if x0 <= px <= x1 and y0 <= py <= y1:
+            return True
+    for ex0, ey0, ex1, ey1 in ((x0, y0, x1, y0), (x1, y0, x1, y1),
+                               (x1, y1, x0, y1), (x0, y1, x0, y0)):
+        dx, dy = ex1 - ex0, ey1 - ey0
+        fx, fy = ex0 - cx, ey0 - cy
+        a = dx * dx + dy * dy
+        if a == 0.0:
+            continue
+        b = 2.0 * (fx * dx + fy * dy)
+        disc = b * b - 4.0 * a * (fx * fx + fy * fy - r * r)
+        if disc < 0.0:
+            continue
+        sq = math.sqrt(disc)
+        for t in ((-b - sq) / (2.0 * a), (-b + sq) / (2.0 * a)):
+            if 0.0 <= t <= 1.0:
+                px, py = ex0 + t * dx, ey0 + t * dy
+                if _on_span(row, math.atan2(py - cy, px - cx) % math.tau):
+                    return True
+    return False
 
 
 def _circle_intersects_rect(c, x0, y0, x1, y1) -> bool:
@@ -1121,7 +1193,7 @@ def entity_grips(entity) -> list[tuple[float, float, str]]:
         grips.append(((s.x + e.x) / 2, (s.y + e.y) / 2, "mid"))
         grips.append((e.x, e.y, "end"))
     elif t == "LWPOLYLINE":
-        pts = entity.get_points("xy")
+        pts = ocs.points_wcs(entity, entity.get_points("xy"))
         for x, y in pts:
             grips.append((x, y, "vertex"))
         pairs = list(zip(pts, pts[1:]))
@@ -1130,18 +1202,21 @@ def entity_grips(entity) -> list[tuple[float, float, str]]:
         for a, b in pairs:
             grips.append(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, "mid"))
     elif t == "CIRCLE":
-        c, r = entity.dxf.center, entity.dxf.radius
+        c, r = ocs.center_wcs(entity), entity.dxf.radius
         grips.append((c.x, c.y, "center"))
         for ang in (0, 90, 180, 270):
             grips.append((c.x + r * math.cos(math.radians(ang)),
                           c.y + r * math.sin(math.radians(ang)), "quadrant"))
     elif t == "ARC":
-        c, r = entity.dxf.center, entity.dxf.radius
+        c, r = ocs.center_wcs(entity), entity.dxf.radius
+        start, end = ocs.angles_wcs(entity)
         grips.append((c.x, c.y, "center"))
-        for a in (entity.dxf.start_angle, entity.dxf.end_angle):
+        for a in (start, end):
             grips.append((c.x + r * math.cos(math.radians(a)),
                           c.y + r * math.sin(math.radians(a)), "end"))
-        mid = math.radians((entity.dxf.start_angle + entity.dxf.end_angle) / 2)
+        # along the sweep: an arc across 0° (350°..10°) has its middle at
+        # 0°, not at the 180° a plain average gives
+        mid = math.radians(start + ((end - start) % 360.0) / 2)
         grips.append((c.x + r * math.cos(mid), c.y + r * math.sin(mid), "mid"))
     elif t == "POINT":
         l = entity.dxf.location
@@ -1255,6 +1330,11 @@ def apply_grip_edit(entity, grip_index: int, role: str, new_point):
 
     t = entity.dxftype()
     nx, ny = new_point
+    if t in ("CIRCLE", "ARC", "LWPOLYLINE"):
+        # The branches below write raw attributes as WCS: flip an inverted
+        # OCS to +Z first (same geometry, same grip list — entity_grips
+        # reads WCS either way; the caller's snapshot undoes it).
+        ocs.upright(entity)
     if t == "IMAGE":
         # Uniform scale about the OPPOSITE corner (aspect locked, like
         # AutoCAD's image grips): the drag point projects onto the diagonal

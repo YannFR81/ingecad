@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from core import actions
+from core import actions, ocs
 from core.i18n import tr
 from tools.base import Point, Tool
 
@@ -254,8 +254,8 @@ class CircleTool(Tool):
             s, e = entity.dxf.start, entity.dxf.end
             return ("line", (s.x, s.y), (e.x, e.y))
         if kind in ("CIRCLE", "ARC"):
-            c = entity.dxf.center
-            return ("circle", (c.x, c.y), float(entity.dxf.radius))
+            cx, cy, r = ocs.circle_wcs(entity)
+            return ("circle", (cx, cy), r)
         self.ctx.echo(tr("Tangent picks support lines, circles and arcs."))
         return None
 

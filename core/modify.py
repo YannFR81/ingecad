@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import math
 
+from ezdxf.math import Vec2
+
+from core import ocs
 from core.actions import (ReplaceEntitiesCommand, _restore_entity,
                           transform_entity)
 from core.commands import Command
@@ -70,14 +73,17 @@ def stretch_points(entity) -> list[Point]:
         return [(entity.dxf.start.x, entity.dxf.start.y),
                 (entity.dxf.end.x, entity.dxf.end.y)]
     if kind == "LWPOLYLINE":
-        return [(p[0], p[1]) for p in entity.get_points("xy")]
+        return ocs.points_wcs(entity,
+                              [(p[0], p[1]) for p in entity.get_points("xy")])
     if kind == "POLYLINE":
-        return [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
+        points = [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
+        return ocs.points_wcs(entity, points) \
+            if entity.get_mode() == "AcDb2dPolyline" else points
     if kind == "ARC":
-        c, r = entity.dxf.center, entity.dxf.radius
-        return [(c.x + r * math.cos(math.radians(a)),
-                 c.y + r * math.sin(math.radians(a)))
-                for a in (entity.dxf.start_angle, entity.dxf.end_angle)]
+        cx, cy, r, a_start, a_end = ocs.arc_wcs(entity)
+        return [(cx + r * math.cos(math.radians(a)),
+                 cy + r * math.sin(math.radians(a)))
+                for a in (a_start, a_end)]
     attr = _ANCHOR_ATTR.get(kind, "__unknown__")
     if attr:
         try:
@@ -106,6 +112,12 @@ def stretch_entity(entity, rects, dx: float, dy: float) -> bool:
         _move_whole(entity, dx, dy)
         return True
 
+    # Moving single vertices: work in WCS. An inverted OCS is flipped to +Z
+    # first (same geometry; StretchCommand's snapshot undoes it exactly),
+    # so the raw attributes below ARE the points ``caught`` was measured on.
+    if ocs.upright(entity):
+        points = stretch_points(entity)
+        caught = [_inside(p, rects) for p in points]
     kind = entity.dxftype()
     if kind == "LINE":
         if caught[0]:
@@ -231,7 +243,8 @@ def break_pieces(entity, first: Point, second: Point):
     if kind == "CIRCLE":
         # A broken circle becomes the arc that runs counter-clockwise from
         # the first point to the second (BREAK, p.270).
-        c, r = entity.dxf.center, entity.dxf.radius
+        cx, cy, r = ocs.circle_wcs(entity)
+        c = Vec2(cx, cy)
         a1 = _angle_on_circle(c, first)
         a2 = _angle_on_circle(c, second)
         if abs(_sweep(a2, a1)) < 1e-9:
@@ -239,8 +252,9 @@ def break_pieces(entity, first: Point, second: Point):
         return [("ARC", (c.x, c.y), r, a2, a1)]
 
     if kind == "ARC":
-        c, r = entity.dxf.center, entity.dxf.radius
-        a0, a1 = entity.dxf.start_angle % 360.0, entity.dxf.end_angle % 360.0
+        cx, cy, r, a0, a1 = ocs.arc_wcs(entity)
+        c = Vec2(cx, cy)
+        a0, a1 = a0 % 360.0, a1 % 360.0
         p = sorted((_angle_on_circle(c, first), _angle_on_circle(c, second)),
                    key=lambda a: _sweep(a0, a))
         cut_lo, cut_hi = p
@@ -282,7 +296,7 @@ def _break_polyline(entity, first: Point, second: Point):
     bulge dropped, because half of an arc with the same bulge is a different
     arc and inventing one silently would move the drawing.
     """
-    raw = list(entity.get_points("xyseb"))
+    raw = ocs.rows_wcs(entity, entity.get_points("xyseb"))
     points = [(p[0], p[1]) for p in raw]
     closed = bool(entity.closed)
     a = _polyline_position(points, closed, first)
@@ -450,18 +464,18 @@ def join_pieces(entities):
         return ("LINE", along[0], along[-1]), ""
 
     if kinds == {"ARC"}:
-        centers = [(e.dxf.center.x, e.dxf.center.y) for e in entities]
-        radii = [float(e.dxf.radius) for e in entities]
+        arcs = [ocs.arc_wcs(e) for e in entities]
+        centers = [(a[0], a[1]) for a in arcs]
+        radii = [a[2] for a in arcs]
         if any(math.dist(centers[0], c) > 1e-7 for c in centers[1:]) or \
                 any(abs(radii[0] - r) > 1e-7 for r in radii[1:]):
             return _as_polyline(entities, "same circle")
         # Counter-clockwise from the source arc, as AutoCAD does.
-        source = entities[0]
-        start = source.dxf.start_angle % 360.0
-        end = source.dxf.end_angle % 360.0
-        for arc in entities[1:]:
-            a0 = arc.dxf.start_angle % 360.0
-            a1 = arc.dxf.end_angle % 360.0
+        start = arcs[0][3] % 360.0
+        end = arcs[0][4] % 360.0
+        for arc in arcs[1:]:
+            a0 = arc[3] % 360.0
+            a1 = arc[4] % 360.0
             if _sweep(start, a0) >= _sweep(start, end):
                 end = a1
         return ("ARC", centers[0], radii[0], start, end), ""
@@ -489,15 +503,15 @@ def _entity_chain_rows(entity):
         (x1, y1), (x2, y2) = _line_ends(entity)
         return [(x1, y1, 0.0), (x2, y2, 0.0)]
     if kind == "ARC":
-        c, r = entity.dxf.center, entity.dxf.radius
-        a0, a1 = entity.dxf.start_angle, entity.dxf.end_angle
+        cx, cy, r, a0, a1 = ocs.arc_wcs(entity)
         bulge = bulge_of_arc(a0, a1)
-        p0 = (c.x + r * math.cos(math.radians(a0)),
-              c.y + r * math.sin(math.radians(a0)))
-        p1 = (c.x + r * math.cos(math.radians(a1)),
-              c.y + r * math.sin(math.radians(a1)))
+        p0 = (cx + r * math.cos(math.radians(a0)),
+              cy + r * math.sin(math.radians(a0)))
+        p1 = (cx + r * math.cos(math.radians(a1)),
+              cy + r * math.sin(math.radians(a1)))
         return [(p0[0], p0[1], bulge), (p1[0], p1[1], 0.0)]
-    rows = [(p[0], p[1], p[4]) for p in entity.get_points("xyseb")]
+    rows = [(p[0], p[1], p[4])
+            for p in ocs.rows_wcs(entity, entity.get_points("xyseb"))]
     return rows
 
 

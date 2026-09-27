@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 
+from core import ocs
 from core.hatch_boundary import boundary_polygon, polygon_area
 from core.i18n import tr
 from core.units import Units
@@ -417,7 +418,8 @@ def describe_entity(entity, units: Units | None = None) -> list[str]:
             x=units.length(dx), y=units.length(dy),
             z=units.length(b.z - a.z)))
     elif kind in ("CIRCLE", "ARC"):
-        c = dxf.center
+        # In WCS, like AutoCAD's LIST: the stored centre is in the OCS.
+        c = entity.ocs().to_wcs(dxf.center)
         lines.append(point_line(tr("center point"), (c.x, c.y, c.z)))
         lines.append(f"{'':>8}" + tr("Radius = {value}",
                                      value=units.length(dxf.radius)))
@@ -428,9 +430,11 @@ def describe_entity(entity, units: Units | None = None) -> list[str]:
             lines.append(f"{'':>8}" + tr("Area = {value}",
                                          value=units.area(math.pi * r * r)))
         else:
+            start, end = ocs.angles_wcs(entity) if ocs.is_planar(entity) \
+                else (dxf.start_angle, dxf.end_angle)
             lines.append(f"{'':>8}" + tr(
                 "Start angle = {a}, End angle = {b}",
-                a=units.angle(dxf.start_angle), b=units.angle(dxf.end_angle)))
+                a=units.angle(start), b=units.angle(end)))
     elif kind in ("TEXT", "ATTDEF"):
         p = dxf.insert
         lines.append(point_line(tr("start point"), (p.x, p.y, p.z)))
@@ -466,7 +470,8 @@ def describe_entity(entity, units: Units | None = None) -> list[str]:
                                          area=units.area(area), label=label,
                                          value=units.length(perimeter)))
         try:
-            points = [(p[0], p[1]) for p in entity.get_points("xy")]
+            points = ocs.points_wcs(
+                entity, [(p[0], p[1]) for p in entity.get_points("xy")])
         except Exception:
             points = [(v.dxf.location.x, v.dxf.location.y)
                       for v in getattr(entity, "vertices", [])]

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import math
 
+from core import ocs
+
 Point = tuple[float, float]
 
 
@@ -23,13 +25,15 @@ def boundary_polygon(entity, arc_segments: int = 72) -> list[Point] | None:
     if t == "LWPOLYLINE":
         if not entity.closed:
             return None
-        return [(p[0], p[1]) for p in entity.get_points("xy")]
+        return ocs.points_wcs(
+            entity, [(p[0], p[1]) for p in entity.get_points("xy")])
     if t == "POLYLINE":
         if not entity.is_closed or entity.get_mode() != "AcDb2dPolyline":
             return None
-        return [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
+        return ocs.points_wcs(entity, [(v.dxf.location.x, v.dxf.location.y)
+                                       for v in entity.vertices])
     if t == "CIRCLE":
-        c, r = entity.dxf.center, entity.dxf.radius
+        c, r = ocs.center_wcs(entity), entity.dxf.radius
         return [(c.x + r * math.cos(2 * math.pi * i / arc_segments),
                  c.y + r * math.sin(2 * math.pi * i / arc_segments))
                 for i in range(arc_segments)]

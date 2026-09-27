@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-from core import actions
+from core import actions, ocs
 from core.i18n import tr
 from tools.base import Point, Tool
 
@@ -55,13 +55,12 @@ def _entity_endpoints(entity, pick: Point, quadrant_rule: bool = False):
         s, e = entity.dxf.start, entity.dxf.end
         return (s.x, s.y), (e.x, e.y)
     if t == "ARC":
-        c, r = entity.dxf.center, entity.dxf.radius
-        a0 = math.radians(entity.dxf.start_angle)
-        a1 = math.radians(entity.dxf.end_angle)
+        c, r = ocs.center_wcs(entity), entity.dxf.radius
+        a0, a1 = (math.radians(a) for a in ocs.angles_wcs(entity))
         return ((c.x + r * math.cos(a0), c.y + r * math.sin(a0)),
                 (c.x + r * math.cos(a1), c.y + r * math.sin(a1)))
     if t == "CIRCLE":
-        c, r = entity.dxf.center, entity.dxf.radius
+        c, r = ocs.center_wcs(entity), entity.dxf.radius
         vx, vy = pick[0] - c.x, pick[1] - c.y
         if quadrant_rule:
             if abs(vy) >= abs(vx):          # near N/S -> horizontal dimension
@@ -71,7 +70,8 @@ def _entity_endpoints(entity, pick: Point, quadrant_rule: bool = False):
         ux, uy = vx / d, vy / d
         return (c.x - r * ux, c.y - r * uy), (c.x + r * ux, c.y + r * uy)
     if t == "LWPOLYLINE":
-        pts = [(p[0], p[1]) for p in entity.get_points("xy")]
+        pts = ocs.points_wcs(
+            entity, [(p[0], p[1]) for p in entity.get_points("xy")])
         if len(pts) < 2:
             return None
         segs = list(zip(pts, pts[1:]))
@@ -464,14 +464,14 @@ class _CurvedDim(_DimTextMixin, Tool):
             self._ent = e
             self.prompt(self._location_prompt())
         else:
-            c = self._ent.dxf.center
+            c = ocs.center_wcs(self._ent)
             self.ctx.execute(self._make((c.x, c.y), self._ent.dxf.radius, point))
             self.ctx.finish()
 
     def preview_segments(self, cursor: Point):
         if self._ent is None:
             return []
-        c = self._ent.dxf.center
+        c = ocs.center_wcs(self._ent)
         return [((c.x, c.y), cursor)]
 
 
@@ -577,16 +577,15 @@ class DimAngularTool(_DimTextMixin, Tool):
             e = self.ctx.services.pick_entity(point) if self.ctx.services else None
             t = e.dxftype() if e is not None else None
             if t == "ARC":
-                c, r = e.dxf.center, e.dxf.radius
-                a0 = math.radians(e.dxf.start_angle)
-                a1 = math.radians(e.dxf.end_angle)
+                c, r = ocs.center_wcs(e), e.dxf.radius
+                a0, a1 = (math.radians(a) for a in ocs.angles_wcs(e))
                 self._vertex = (c.x, c.y)
                 self._p1 = (c.x + r * math.cos(a0), c.y + r * math.sin(a0))
                 self._p2 = (c.x + r * math.cos(a1), c.y + r * math.sin(a1))
                 self._region_free = False
                 self._to_locate()
             elif t == "CIRCLE":
-                c, r = e.dxf.center, e.dxf.radius
+                c, r = ocs.center_wcs(e), e.dxf.radius
                 a = math.atan2(point[1] - c.y, point[0] - c.x)
                 self._vertex = (c.x, c.y)
                 self._p1 = (c.x + r * math.cos(a), c.y + r * math.sin(a))
@@ -732,12 +731,12 @@ class DimArcTool(_DimTextMixin, Tool):
     def _arc_params(entity, pick: Point):
         t = entity.dxftype()
         if t == "ARC":
-            c = entity.dxf.center
+            c = ocs.center_wcs(entity)
             return ((c.x, c.y), float(entity.dxf.radius),
-                    float(entity.dxf.start_angle), float(entity.dxf.end_angle))
+                    *ocs.angles_wcs(entity))
         if t == "LWPOLYLINE":
             from ezdxf.math import bulge_to_arc
-            pts = list(entity.get_points("xyb"))
+            pts = ocs.bulge_vertices_wcs(entity, entity.get_points("xyb"))
             segs = list(zip(pts, pts[1:]))
             if entity.closed and len(pts) > 1:
                 segs.append((pts[-1], (*pts[0][:2], 0.0)))

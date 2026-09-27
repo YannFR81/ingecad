@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 
-from core import actions, editmath, polyoffset
+from core import actions, editmath, ocs, polyoffset
 from core.i18n import tr
 from tools.base import Point, Tool
 
@@ -491,8 +491,8 @@ class OffsetTool(Tool):
                 closest = abs((side[0] - seg[0]) * dy
                               - (side[1] - seg[1]) * dx) / length
             return closest or None
-        center = (entity.dxf.center.x, entity.dxf.center.y)
-        return abs(math.dist(center, side) - entity.dxf.radius) or None
+        cx, cy, r = ocs.circle_wcs(entity)
+        return abs(math.dist((cx, cy), side) - r) or None
 
     def _emit(self, entity, side: Point) -> None:
         distance = self._distance_for(entity, side)
@@ -530,9 +530,10 @@ class OffsetTool(Tool):
                     (p[0], p[1]), (p[2], p[3]), dxfattribs=dict(a)),
                 layer=layer)
         else:
-            center = (entity.dxf.center.x, entity.dxf.center.y)
+            cx, cy, radius = ocs.circle_wcs(entity)
+            center = (cx, cy)
             new_r = editmath.offset_circle_radius(
-                entity.dxf.radius, distance, center, side)
+                radius, distance, center, side)
             if new_r is None:
                 self.ctx.echo(tr("Radius would vanish."))
                 return
@@ -543,7 +544,7 @@ class OffsetTool(Tool):
                         msp.add_circle(c, r, dxfattribs=dict(a)),
                     layer=layer)
             else:
-                a0, a1 = entity.dxf.start_angle, entity.dxf.end_angle
+                a0, a1 = ocs.arc_wcs(entity)[3:]
                 command = actions.AddEntityCommand(
                     "OFFSET",
                     lambda msp, c=center, r=new_r, s=a0, en=a1, a=attribs:
@@ -575,9 +576,11 @@ _OFFSETTABLE = ("LINE", "CIRCLE", "ARC", "LWPOLYLINE", "POLYLINE")
 def _polyline_rows(entity):
     """(x, y, start_width, end_width, bulge) rows, for either polyline type."""
     if entity.dxftype() == "LWPOLYLINE":
-        return list(entity.get_points("xyseb"))
-    return [(v.dxf.location.x, v.dxf.location.y, 0.0, 0.0,
+        return ocs.rows_wcs(entity, entity.get_points("xyseb"))
+    rows = [(v.dxf.location.x, v.dxf.location.y, 0.0, 0.0,
              getattr(v.dxf, "bulge", 0.0) or 0.0) for v in entity.vertices]
+    return ocs.rows_wcs(entity, rows) if entity.get_mode() == "AcDb2dPolyline" \
+        else rows
 
 
 def _polyline_closed(entity) -> bool:
@@ -709,34 +712,36 @@ class _TrimExtendBase(Tool):
             ]
             self._replace("TRIM", entity, factories)
         elif t == "CIRCLE":
-            center = (entity.dxf.center.x, entity.dxf.center.y)
+            cx, cy, radius = ocs.circle_wcs(entity)
+            center = (cx, cy)
             pick_ang = math.atan2(point[1] - center[1], point[0] - center[0])
-            arc = editmath.trim_circle(center, entity.dxf.radius, segs, pick_ang,
+            arc = editmath.trim_circle(center, radius, segs, pick_ang,
                                        cutter_circles=circles)
             if arc is None:
                 self.ctx.echo(tr("A circle needs two crossings to trim."))
                 return
             a0, a1 = arc
             self._replace("TRIM", entity,
-                          [lambda msp, c=center, r=entity.dxf.radius,
+                          [lambda msp, c=center, r=radius,
                                   s=a0, e=a1: msp.add_arc(c, r, s, e)])
         elif t == "ARC":
-            center = (entity.dxf.center.x, entity.dxf.center.y)
+            cx, cy, radius, start, end = ocs.arc_wcs(entity)
+            center = (cx, cy)
             pick_ang = math.atan2(point[1] - center[1], point[0] - center[0])
             spans = editmath.trim_arc(
-                center, entity.dxf.radius, entity.dxf.start_angle,
-                entity.dxf.end_angle, segs, pick_ang, cutter_circles=circles)
+                center, radius, start, end, segs, pick_ang,
+                cutter_circles=circles)
             if spans is None:
                 self.ctx.echo(tr("No cutting edge crosses it."))
                 return
             factories = [
-                (lambda msp, c=center, r=entity.dxf.radius, s=s0, e=e0:
+                (lambda msp, c=center, r=radius, s=s0, e=e0:
                      msp.add_arc(c, r, s, e))
                 for s0, e0 in spans
             ]
             self._replace("TRIM", entity, factories)
         elif t == "LWPOLYLINE":
-            pts = entity.get_points("xyb")
+            pts = ocs.bulge_vertices_wcs(entity, entity.get_points("xyb"))
             if any(abs(p[2]) > 1e-12 for p in pts):
                 self.ctx.echo(tr("Curved polyline segments not supported yet."))
                 return
@@ -768,7 +773,7 @@ class _TrimExtendBase(Tool):
                           [lambda msp, p=new_seg:
                                msp.add_line((p[0], p[1]), (p[2], p[3]))])
         elif t == "LWPOLYLINE":
-            pts = entity.get_points("xyb")
+            pts = ocs.bulge_vertices_wcs(entity, entity.get_points("xyb"))
             if any(abs(p[2]) > 1e-12 for p in pts):
                 self.ctx.echo(tr("Curved polyline segments not supported yet."))
                 return
@@ -907,10 +912,10 @@ def _entity_bbox(entity):
         s, e = entity.dxf.start, entity.dxf.end
         return (min(s.x, e.x), min(s.y, e.y), max(s.x, e.x), max(s.y, e.y))
     if t in ("CIRCLE", "ARC"):
-        c, r = entity.dxf.center, entity.dxf.radius
-        return (c.x - r, c.y - r, c.x + r, c.y + r)
+        cx, cy, r = ocs.circle_wcs(entity)
+        return (cx - r, cy - r, cx + r, cy + r)
     if t == "LWPOLYLINE":
-        pts = entity.get_points("xy")
+        pts = ocs.points_wcs(entity, entity.get_points("xy"))
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
         return (min(xs), min(ys), max(xs), max(ys))
@@ -926,21 +931,21 @@ def _point_on_entity_near(entity, target: Point):
         u = _param_on_segment(seg, target)
         return (seg[0] + u * (seg[2] - seg[0]), seg[1] + u * (seg[3] - seg[1]))
     if t in ("CIRCLE", "ARC"):
-        c = entity.dxf.center
-        ang = math.atan2(target[1] - c.y, target[0] - c.x)
+        cx, cy, r = ocs.circle_wcs(entity)
+        ang = math.atan2(target[1] - cy, target[0] - cx)
         if t == "ARC":
-            a0 = math.radians(entity.dxf.start_angle) % math.tau
-            a1 = math.radians(entity.dxf.end_angle) % math.tau
+            _cx, _cy, _r, d0, d1 = ocs.arc_wcs(entity)
+            a0 = math.radians(d0) % math.tau
+            a1 = math.radians(d1) % math.tau
             if a1 <= a0:
                 a1 += math.tau
             rel = (ang - a0) % math.tau
             if rel > (a1 - a0):
                 # clamp to the nearest arc end
                 ang = a0 if rel - (a1 - a0) > (math.tau - rel) else a1
-        r = entity.dxf.radius
-        return (c.x + r * math.cos(ang), c.y + r * math.sin(ang))
+        return (cx + r * math.cos(ang), cy + r * math.sin(ang))
     if t == "LWPOLYLINE":
-        pts = entity.get_points("xy")
+        pts = ocs.points_wcs(entity, entity.get_points("xy"))
         pairs = list(zip(pts, pts[1:]))
         if entity.closed and len(pts) > 2:
             pairs.append((pts[-1], pts[0]))

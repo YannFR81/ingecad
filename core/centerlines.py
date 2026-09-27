@@ -32,6 +32,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from core import ocs
 from core.commands import CompositeCommand
 
 SETTING_EXE = "center/exe"
@@ -265,7 +266,7 @@ def _in_drawing_units(prefs: CenterSettings, drawing) -> CenterSettings:
 def center_mark(entity, prefs: CenterSettings | None = None):
     """CENTERMARK on a circle or arc, as one undo step."""
     prefs = _in_drawing_units(prefs or settings(), entity.doc)
-    c = entity.dxf.center
+    c = ocs.center_wcs(entity)
     segments = center_mark_segments((c.x, c.y), float(entity.dxf.radius),
                                     prefs)
     return _lines_command(entity.doc, "CENTERMARK", segments, prefs)

@@ -21,6 +21,7 @@ import math
 
 from core import aliases as aliases_mod
 from core import i18n
+from core import ocs
 from core.commands import Command
 from core.i18n import tr
 
@@ -680,7 +681,8 @@ def can_transform(entity, matrix) -> bool:
 class TransformCommand(Command):
     """Apply a Matrix44 to entities in place; undo applies the inverse."""
 
-    def __init__(self, name: str, entities, matrix) -> None:
+    def __init__(self, name: str, entities, matrix,
+                 upright: bool = False) -> None:
         self.name = name
         entities = list(entities)
         #: Objects this matrix cannot move (a rotated viewport). Kept so the
@@ -688,19 +690,37 @@ class TransformCommand(Command):
         self.skipped = [e for e in entities if not can_transform(e, matrix)]
         self.entities = [e for e in entities if can_transform(e, matrix)]
         self.matrix = matrix
+        #: Flip entities the matrix leaves with a (0, 0, -1) extrusion back
+        #: to +Z (MIRROR). The flip is not part of the matrix, so the OCS
+        #: entities keep their state from before the command and undo puts
+        #: that back instead of running the inverse on them — exact, down to
+        #: an extrusion attribute the original never had.
+        self.upright = upright
+        self._before: list = []
 
     def do(self, document) -> None:
+        self._before = []
         for e in self.entities:
+            if self.upright and e.dxftype() in ocs.OCS_TYPES:
+                self._before.append((e, e.copy()))
             transform_entity(e, self.matrix)
+            if self.upright and e.dxftype() in ocs.OCS_TYPES:
+                ocs.upright(e)
         document.dirty = True
 
     def undo(self, document) -> None:
         from ezdxf.math import Matrix44
 
+        restored = set()
+        for e, before in self._before:
+            _restore_entity(e, before)
+            restored.add(id(e))
+        self._before = []
         inverse = Matrix44(self.matrix)
         inverse.inverse()
         for e in self.entities:
-            transform_entity(e, inverse)
+            if id(e) not in restored:
+                transform_entity(e, inverse)
         document.dirty = True
 
 
@@ -730,9 +750,11 @@ class CopyEntitiesCommand(Command):
 
     name = "COPY"
 
-    def __init__(self, entities, matrix) -> None:
+    def __init__(self, entities, matrix, upright: bool = False) -> None:
         self.sources = list(entities)
         self.matrix = matrix
+        #: See TransformCommand.upright; a copy has no undo state to keep.
+        self.upright = upright
         self.copies = []
 
     def do(self, document) -> None:
@@ -741,6 +763,8 @@ class CopyEntitiesCommand(Command):
         for e in self.sources:
             clone = e.copy()
             transform_entity(clone, self.matrix)
+            if self.upright and clone.dxftype() in ocs.OCS_TYPES:
+                ocs.upright(clone)
             msp.add_entity(clone)
             self.copies.append(clone)
         document.dirty = True
@@ -995,12 +1019,13 @@ def _add_boundary(hatch, item, flags: int) -> None:
         return
     t = item.dxftype()
     if t == "LWPOLYLINE":
-        pts = [(p[0], p[1], p[2]) for p in item.get_points("xyb")]
+        pts = ocs.bulge_vertices_wcs(
+            item, [(p[0], p[1], p[2]) for p in item.get_points("xyb")])
         hatch.paths.add_polyline_path(pts, is_closed=True, flags=flags)
     elif t == "CIRCLE":
-        c = item.dxf.center
+        cx, cy, r = ocs.circle_wcs(item)
         path = hatch.paths.add_edge_path(flags=flags)
-        path.add_arc((c.x, c.y), item.dxf.radius, 0, 360)
+        path.add_arc((cx, cy), r, 0, 360)
     elif t == "ELLIPSE":
         c = item.dxf.center
         maj = item.dxf.major_axis
@@ -1771,8 +1796,7 @@ def center_mark(entity):
     if not size:
         return None
     s = abs(size)
-    c = entity.dxf.center
-    cx, cy, r = c.x, c.y, float(entity.dxf.radius)
+    cx, cy, r = ocs.circle_wcs(entity)
     lines = [((cx - s, cy), (cx + s, cy)), ((cx, cy - s), (cx, cy + s))]
     if size < 0 and r + s >= 2.0 * s:
         far = r + s
@@ -1857,12 +1881,16 @@ def _mirror_matrix(p1, p2):
 
 
 def mirror_entities(entities, p1, p2, keep_source: bool = True) -> Command:
+    """MIRROR. A mirror matrix leaves ezdxf's arcs, circles and polylines
+    with a (0, 0, -1) extrusion; AutoCAD's MIRROR keeps the normal up, and
+    so does this — an inverted OCS is legal, but every reader that forgets
+    it (issue #10) sees the entity somewhere it isn't drawn."""
     m = _mirror_matrix(p1, p2)
     if keep_source:
-        cmd = CopyEntitiesCommand(entities, m)
+        cmd = CopyEntitiesCommand(entities, m, upright=True)
         cmd.name = "MIRROR"
         return cmd
-    return TransformCommand("MIRROR", entities, m)
+    return TransformCommand("MIRROR", entities, m, upright=True)
 
 
 def copy_entities(entities, dx: float, dy: float) -> CopyEntitiesCommand:

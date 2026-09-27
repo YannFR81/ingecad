@@ -42,6 +42,8 @@ from typing import Optional
 
 import numpy as np
 
+from core import ocs
+
 # Lower = wins when within threshold.
 PRIORITY = {"END": 0, "INT": 1, "MID": 2, "CEN": 3, "GCE": 4, "NOD": 5,
             "ORI": 6, "QUA": 7, "INS": 8, "PER": 9, "TAN": 10, "NEA": 11}
@@ -125,8 +127,17 @@ class SnapEngine:
                 s, w = e.dxf.start, e.dxf.end
                 segs.append((s.x, s.y, w.x, w.y))
                 seg_o.append(oid)
+            elif t in ("LWPOLYLINE", "CIRCLE", "ARC") \
+                    and not ocs.is_planar(e):
+                # Tilted extrusion: no circle in plan. Its traced outline
+                # still snaps (NEArest, endpoints of the trace).
+                if curves is not None:
+                    points = SnapEngine._flatten(e)
+                    SnapEngine._chords(points, oid, curves, curve_o)
+                    SnapEngine._curve_targets(points, oid, targets, target_o)
             elif t == "LWPOLYLINE":
-                vertices = [(v[0], v[1], v[4]) for v in e.get_points("xyseb")]
+                vertices = ocs.bulge_vertices_wcs(
+                    e, [(v[0], v[1], v[4]) for v in e.get_points("xyseb")])
                 SnapEngine._polyline(vertices, bool(e.closed), oid,
                                      segs, seg_o, arcs, arc_o)
                 if e.closed and targets is not None:
@@ -138,22 +149,24 @@ class SnapEngine:
                     vertices = [(v.dxf.location.x, v.dxf.location.y,
                                  getattr(v.dxf, "bulge", 0.0) or 0.0)
                                 for v in e.vertices]
+                    if e.get_mode() == "AcDb2dPolyline":
+                        vertices = ocs.bulge_vertices_wcs(e, vertices)
                     SnapEngine._polyline(vertices, bool(e.is_closed), oid,
                                          segs, seg_o, arcs, arc_o)
             elif t == "CIRCLE":
-                c = e.dxf.center
-                circles.append((c.x, c.y, e.dxf.radius))
+                cx, cy, r = ocs.circle_wcs(e)
+                circles.append((cx, cy, r))
                 circle_o.append(oid)
                 if targets is not None:      # a circle's area centre is its centre
-                    targets.append((c.x, c.y, _TARGET_CODE["GCE"]))
+                    targets.append((cx, cy, _TARGET_CODE["GCE"]))
                     target_o.append(oid)
             elif t == "ARC":
-                c = e.dxf.center
-                a0 = math.radians(e.dxf.start_angle)
-                a1 = math.radians(e.dxf.end_angle)
+                cx, cy, r, d0, d1 = ocs.arc_wcs(e)
+                a0 = math.radians(d0)
+                a1 = math.radians(d1)
                 if a1 <= a0:
                     a1 += math.tau
-                arcs.append((c.x, c.y, e.dxf.radius, a0, a1))
+                arcs.append((cx, cy, r, a0, a1))
                 arc_o.append(oid)
             elif t == "POINT":
                 l = e.dxf.location
