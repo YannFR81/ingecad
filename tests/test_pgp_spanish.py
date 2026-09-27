@@ -149,3 +149,19 @@ def test_reinit_without_pgp_file_ticked_changes_nothing(qapp, tmp_path,
     finally:
         win.document.dirty = False
         win.close()
+
+
+def test_a_spanish_user_gets_pol_for_polyline_through_acad_pgp(tmp_path):
+    """POL is PLINE in a Spanish AutoCAD but POLYGON in the English
+    acad.pgp, and English wins -- so the Spanish name is not in the pack.
+    One line in the user's acad.pgp gives it back."""
+    path = tmp_path / "acad.pgp"
+    path.write_text("POL, *PLINE\n", encoding="utf-8")
+    d = Dispatcher(aliases=aliases_mod.load_aliases(path))
+    ran = []
+    for name in ("PLINE", "POLYGON"):
+        d.register(name, lambda *a, name=name: ran.append(name))
+    d.submit("POL")
+    assert ran == ["PLINE"]
+    assert Dispatcher(aliases=aliases_mod.load_aliases(tmp_path / "none")) \
+        .aliases["POL"] == "POLYGON"                  # the stock alias
