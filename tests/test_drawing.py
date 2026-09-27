@@ -320,7 +320,9 @@ def test_tangent_touches_the_circle_where_the_line_from_the_last_point_does():
     assert dot == pytest.approx(0.0, abs=1e-6)
 
 
-def test_tangent_needs_a_previous_point():
+def test_tangent_without_a_previous_point_is_deferred():
+    """Nothing to be tangent from yet: AutoCAD's deferred tangent (#19).
+    The hit names the circle; the point is solved by the next one."""
     from core.document import Document
     from core.snap import SnapEngine
 
@@ -328,4 +330,8 @@ def test_tangent_needs_a_previous_point():
     document.modelspace().add_circle((80, 0), 10)
     engine = SnapEngine(document)
     engine._build()
-    assert engine.find((70.5, 3.5), 2.0, kinds=frozenset({"TAN"})) is None
+    hit = engine.find((70.5, 3.5), 2.0, kinds=frozenset({"TAN"}))
+    assert hit is not None and hit.kind == "DTAN"
+    assert hit.circle == (80.0, 0.0, 10.0)
+    # and not offered when TAN is not asked for
+    assert engine.find((70.5, 3.5), 2.0, kinds=frozenset({"END"})) is None

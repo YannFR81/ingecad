@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from core import actions, ocs
+from core import actions, editmath, ocs
 from core.i18n import tr
 from tools.base import Point, Tool
 
@@ -69,7 +69,48 @@ class LineTool(Tool):
         self.name = "LINE"
         self._points: list[Point] = []
         self._locked_dir = None       # tangent lock after Continue-from-arc
+        #: A first point picked with a deferred tangent: (circle, pick). The
+        #: point on the circle is solved when the next point is known.
+        self._deferred = None
         self.prompt("Specify first point:")
+
+    def on_deferred_tangent(self, circle, pick: Point) -> None:
+        """TAN with no previous point (AutoCAD's deferred tangent)."""
+        if self._points:
+            self.on_point(pick)        # there is a point: an ordinary tangent
+            return
+        if self._deferred is None:
+            self._deferred = (circle, pick)
+            self._next_prompt()
+            return
+        # tangent to two round objects: the common tangent nearest the picks
+        first, first_pick = self._deferred
+        lines = editmath.common_tangents(first, circle)
+        if not lines:
+            self.ctx.echo(tr("No tangent line between those objects."))
+            return
+        a, b = min(lines, key=lambda ab: math.dist(ab[0], first_pick)
+                   + math.dist(ab[1], pick))
+        self._deferred = None
+        self._start_at(a)
+        self.on_point(b)
+
+    def _resolve_deferred(self, point: Point) -> bool:
+        """The first point was a deferred tangent: put it where the line
+        from ``point`` touches that circle, the touch point nearest the
+        pick. False if ``point`` is inside the circle."""
+        circle, pick = self._deferred
+        touches = editmath.tangent_points_from(circle, point)
+        if not touches:
+            self.ctx.echo(tr("No tangent from a point inside the circle."))
+            return False
+        self._deferred = None
+        self._start_at(min(touches, key=lambda t: math.dist(t, pick)))
+        return True
+
+    def _start_at(self, point: Point) -> None:
+        self._points.append(point)
+        self.last_point = point
 
     def _segment(self, a: Point, b: Point) -> None:
         self.ctx.execute(actions.add_line(a, b))
@@ -82,6 +123,9 @@ class LineTool(Tool):
             self.prompt("Specify next point or [Undo]:")
 
     def on_point(self, point: Point) -> None:
+        if self._deferred is not None and not self._points:
+            if not self._resolve_deferred(point):
+                return
         if self._locked_dir is not None and self._points:
             # tangent continuation from an arc: direction is locked, the
             # pick only supplies the length (projection onto the tangent)
@@ -146,6 +190,12 @@ class LineTool(Tool):
         return False
 
     def preview_segments(self, cursor: Point):
+        if self._deferred is not None and not self._points:
+            circle, pick = self._deferred
+            touches = editmath.tangent_points_from(circle, cursor)
+            if not touches:
+                return []
+            return [(min(touches, key=lambda t: math.dist(t, pick)), cursor)]
         if not self._points:
             return []
         if self._locked_dir is not None:

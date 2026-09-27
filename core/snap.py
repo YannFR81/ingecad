@@ -46,10 +46,11 @@ from core import ocs
 
 # Lower = wins when within threshold.
 PRIORITY = {"END": 0, "INT": 1, "MID": 2, "CEN": 3, "GCE": 4, "NOD": 5,
-            "ORI": 6, "QUA": 7, "INS": 8, "PER": 9, "TAN": 10, "NEA": 11}
+            "ORI": 6, "QUA": 7, "INS": 8, "PER": 9, "TAN": 10, "DTAN": 10,
+            "NEA": 11}
 #: Every snap a drawing's geometry offers. The origin (ORI) is not one of
 #: them: it is a point no entity owns, offered only when the user ticks it.
-ALL_KINDS = frozenset(k for k in PRIORITY if k != "ORI")
+ALL_KINDS = frozenset(k for k in PRIORITY if k not in ("ORI", "DTAN"))
 
 # Point targets share one table with a kind column, so a curve can offer an
 # end, a midpoint, a centre and four quadrants without four more arrays.
@@ -71,6 +72,10 @@ class SnapHit:
     #: The VIEWPORT (handle) this hit was reached through, when a paper-space
     #: cursor snapped to model geometry a viewport shows; None otherwise.
     via: Optional[str] = None
+    #: DTAN (deferred tangent) only: the circle ``(cx, cy, r)`` picked. The
+    #: point is just where the pick touched it; the real tangent point is
+    #: solved once the next point is known.
+    circle: Optional[tuple] = None
 
 
 class SnapEngine:
@@ -529,14 +534,14 @@ class SnapEngine:
         cx, cy = cursor
         best: Optional[tuple[int, float, SnapHit]] = None
 
-        def offer(kind: str, x: float, y: float) -> None:
+        def offer(kind: str, x: float, y: float, circle=None) -> None:
             nonlocal best
             d = math.hypot(x - cx, y - cy)
             if d > threshold:
                 return
             key = (PRIORITY[kind], d)
             if best is None or key < (best[0], best[1]):
-                best = (PRIORITY[kind], d, SnapHit(x, y, kind))
+                best = (PRIORITY[kind], d, SnapHit(x, y, kind, circle=circle))
 
         circles, arcs, points = self._circles, self._arcs, self._points
 
@@ -650,6 +655,27 @@ class SnapEngine:
                                 math.atan2(ty - row[1], tx - row[0]) % math.tau,
                                 row[3], row[4]):
                             offer("TAN", tx, ty)
+        if "TAN" in kinds and from_point is None:
+            # No previous point to be tangent from: AutoCAD's deferred
+            # tangent. The pick names the round object; the point on it is
+            # solved when the next point is known.
+            for arr, full in ((circles, True), (arcs, False)):
+                if not len(arr):
+                    continue
+                dx, dy = cx - arr[:, 0], cy - arr[:, 1]
+                dist = np.hypot(dx, dy)
+                near = np.nonzero((np.abs(dist - arr[:, 2]) <= threshold)
+                                  & (dist > 1e-12))[0]
+                for i in near:
+                    row = arr[i]
+                    ang = math.atan2(dy[i], dx[i])
+                    if not full and not _angle_in_sweep(ang % math.tau,
+                                                        row[3], row[4]):
+                        continue
+                    offer("DTAN", float(row[0] + row[2] * math.cos(ang)),
+                          float(row[1] + row[2] * math.sin(ang)),
+                          circle=(float(row[0]), float(row[1]),
+                                  float(row[2])))
         if "NOD" in kinds and len(points):
             d2 = (points[:, 0] - cx) ** 2 + (points[:, 1] - cy) ** 2
             i = int(np.argmin(d2))

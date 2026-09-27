@@ -2028,6 +2028,15 @@ class ToolController(QObject):
                 self._window_anchor = (wx, wy)
                 self.changed.emit()
                 return
+        hit = self.snap_hit
+        deferred = getattr(self.tool, "on_deferred_tangent", None)
+        if (hit is not None and hit.kind == "DTAN" and hit.circle is not None
+                and deferred is not None):
+            # a deferred tangent: the tool gets the circle, not a point yet
+            self.osnap_override = None
+            deferred(hit.circle, (hit.x, hit.y))
+            self.changed.emit()
+            return
         point = self.resolved_point(wx, wy)
         self._note_point(point)
         self.tool.on_point(point)

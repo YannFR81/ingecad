@@ -87,6 +87,8 @@ def with_off(bits: int, off: bool) -> int:
 
 
 def label_of(key: str) -> str:
+    if key == "DTAN":
+        return "Deferred Tangent"      # TAN with no previous point yet
     mode = BY_KEY.get(key)
     return mode.label if mode else key
 

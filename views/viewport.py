@@ -1792,9 +1792,12 @@ class Viewport(QOpenGLWidget):
             p.drawRect(x - s, y - s, 2 * s, 2 * s)
             p.drawPoint(QPointF(x, y))
             p.drawEllipse(QPointF(x, y), 1.2, 1.2)
-        elif kind == "TAN":     # circle with its tangent across the top
+        elif kind in ("TAN", "DTAN"):  # circle with its tangent on top
             p.drawEllipse(QPointF(x, y + 1), s - 1, s - 1)
             p.drawLine(QPointF(x - s, y - s), QPointF(x + s, y - s))
+            if kind == "DTAN":           # deferred: three dots beside it
+                for i in range(3):
+                    p.drawPoint(QPointF(x + s + 3 + 3 * i, y + s))
         elif kind == "QUA":     # diamond
             p.drawPolygon([QPointF(x, y - s), QPointF(x + s, y),
                            QPointF(x, y + s), QPointF(x - s, y)])

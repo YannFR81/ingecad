@@ -118,3 +118,63 @@ def test_shift_right_click_opens_the_snap_menu_for_one_point(qapp):
         tools.cancel()
         win.document.dirty = False
         win.close()
+
+
+def _dist_to_line(p, a, b):
+    dx, dy = b.x - a.x, b.y - a.y
+    return abs(dx * (p[1] - a.y) - dy * (p[0] - a.x)) / math.hypot(dx, dy)
+
+
+def test_line_tangent_to_two_circles_uses_deferred_tangents(qapp):
+    """#19: the first TAN has no point to be tangent from -- AutoCAD defers
+    it and solves both touch points once the second circle is picked."""
+    import pytest
+
+    win = _window(qapp)
+    tools = win.tools
+    win.document.modelspace().add_circle((100, 30), 5)
+    tools._invalidate_geometry()
+    try:
+        before = len(_line_ends(win))
+        win._on_command_submitted("LINE")
+        win._on_command_submitted("TAN")
+        tools.on_hover(50, 10.2, threshold_world=2.0)
+        assert tools.snap_hit is not None and tools.snap_hit.kind == "DTAN"
+        tools.on_click(50, 10.2)
+        assert len(_line_ends(win)) == before           # nothing drawn yet
+        win._on_command_submitted("TAN")
+        tools.on_hover(100, 35.2, threshold_world=2.0)
+        assert tools.snap_hit.kind == "DTAN"
+        tools.on_click(100, 35.2)
+        lines = _line_ends(win)
+        assert len(lines) == before + 1
+        a, b = lines[-1]
+        assert _dist_to_line((50, 0), a, b) == pytest.approx(10, abs=1e-9)
+        assert _dist_to_line((100, 30), a, b) == pytest.approx(5, abs=1e-9)
+        assert a.y > 0 and b.y > 30                    # the upper outer one
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()
+
+
+def test_deferred_tangent_then_a_point(qapp):
+    import pytest
+
+    win = _window(qapp)
+    tools = win.tools
+    try:
+        win._on_command_submitted("LINE")
+        win._on_command_submitted("TAN")
+        tools.on_hover(50, 10.2, threshold_world=2.0)
+        tools.on_click(50, 10.2)
+        before = len(_line_ends(win))
+        win._on_command_submitted("0,40")
+        a, b = _line_ends(win)[before]
+        assert (b.x, b.y) == pytest.approx((0, 40))
+        assert _dist_to_line((50, 0), a, b) == pytest.approx(10, abs=1e-9)
+        assert a.y > 5                                  # the touch near the pick
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()

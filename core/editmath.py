@@ -523,6 +523,43 @@ def fillet_parallel(s1: Seg, pick1: Point, s2: Seg):
     return new_s2, (center, r, a0 % 360.0, a1 % 360.0)
 
 
+def tangent_points_from(circle, point: Point) -> list[Point]:
+    """Where the tangent lines from ``point`` touch ``circle`` (cx, cy, r):
+    two points, or none from inside it."""
+    cx, cy, r = circle
+    dx, dy = point[0] - cx, point[1] - cy
+    d = math.hypot(dx, dy)
+    if d <= r + EPS:
+        return []
+    base = math.atan2(dy, dx)
+    spread = math.acos(r / d)
+    return [(cx + r * math.cos(base + s * spread),
+             cy + r * math.sin(base + s * spread)) for s in (1.0, -1.0)]
+
+
+def common_tangents(c1, c2) -> list[tuple[Point, Point]]:
+    """The lines tangent to two circles, as their two touch points: up to
+    four (two outer, two crossing between them)."""
+    x1, y1, r1 = c1
+    x2, y2, r2 = c2
+    dx, dy = x2 - x1, y2 - y1
+    d = math.hypot(dx, dy)
+    if d < EPS:
+        return []
+    ux, uy = dx / d, dy / d
+    out = []
+    for k in (1.0, -1.0):              # 1: outer tangents, -1: crossing
+        c = (r1 - k * r2) / d
+        if c * c > 1.0:
+            continue
+        h = math.sqrt(max(0.0, 1.0 - c * c))
+        for s in (1.0, -1.0):
+            nx, ny = ux * c - s * h * uy, uy * c + s * h * ux
+            out.append(((x1 + r1 * nx, y1 + r1 * ny),
+                        (x2 + k * r2 * nx, y2 + k * r2 * ny)))
+    return out
+
+
 def trim_line_to(seg: Seg, point: Point, pick: Point) -> Seg:
     """FILLET's cut of a line at ``point`` (on its infinite line): keep the
     part on the pick's side, extending the line when the point is past
