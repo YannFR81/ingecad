@@ -314,6 +314,10 @@ class ToolController(QObject):
         from core import osnap as osnap_modes
 
         self.osnap_modes = set(osnap_modes.from_bits(osnap_modes.DEFAULT_BITS))
+        # A one-shot override (typed END/TAN/NONE..., or picked from the
+        # Shift+right-click menu): the snaps for the NEXT point only, running
+        # modes or not. None = no override; an empty set = no snap at all.
+        self.osnap_override: Optional[frozenset] = None
         self.ortho_on = False
         self.polar_on = False
         self.snap_on = False        # SNAP / F9: the cursor jumps by the grid
@@ -1006,6 +1010,7 @@ class ToolController(QObject):
     def _finish(self) -> None:
         self.tool = None
         self.snap_hit = None
+        self.osnap_override = None
         self.current_prompt = ""
         self._recent_points = []
         self.clear_tracking()
@@ -1624,11 +1629,11 @@ class ToolController(QObject):
             and not self.tool.entity_picker)
         if not inside:
             needs_snap = False    # over the paper, outside the viewport
-        if needs_snap and self.osnap_on and self.snap_engine is not None \
-                and self.osnap_modes:
+        kinds = self.snap_kinds()
+        if needs_snap and self.snap_engine is not None and kinds:
             self.snap_hit = self.snap_engine.find(
                 (wx, wy), threshold_world,
-                kinds=frozenset(self.osnap_modes),
+                kinds=kinds,
                 from_point=self.tool.last_point if self.tool else None,
             )
             through = self._snap_through_viewport((wx, wy), threshold_world)
@@ -1730,6 +1735,49 @@ class ToolController(QObject):
         measured along (cleared when the command ends) and LASTPOINT."""
         self._recent_points = (self._recent_points + [tuple(point)])[-2:]
         self.lastpoint = (float(point[0]), float(point[1]))
+        self.osnap_override = None        # a one-shot snap lasts one point
+
+    def snap_kinds(self) -> frozenset:
+        """The object snaps the next point uses: a one-shot override if
+        there is one (even with OSNAP off), else the running modes."""
+        if self.osnap_override is not None:
+            return self.osnap_override
+        return frozenset(self.osnap_modes) if self.osnap_on else frozenset()
+
+    def set_osnap_override(self, keys) -> bool:
+        """Use only ``keys`` for the next point (empty: no snap at all).
+        False, with the reason echoed, for a mode that is not there yet."""
+        from core import osnap as osnap_modes
+
+        keys = frozenset(keys)
+        for key in keys - osnap_modes.AVAILABLE:
+            mode = osnap_modes.BY_KEY.get(key)
+            self.window.command_line.echo(
+                tr(mode.note) if mode and mode.note else tr("Invalid input."))
+            return False
+        self.osnap_override = keys
+        if keys:
+            names = ", ".join(tr(osnap_modes.BY_KEY[k].label)
+                              for k in sorted(keys))
+            self.window.command_line.echo(
+                tr("{snap} for the next point.", snap=names))
+        else:
+            self.window.command_line.echo(
+                tr("No object snap for the next point."))
+        if self._cursor is not None:
+            self._refresh_snap_at_cursor()
+        self.changed.emit()
+        return True
+
+    def _refresh_snap_at_cursor(self) -> None:
+        """Re-run the snap search where the cursor is (in space units)."""
+        if self.snap_engine is None or self.tool is None:
+            return
+        wx, wy = self._cursor
+        kinds = self.snap_kinds()
+        self.snap_hit = (self.snap_engine.find(
+            (wx, wy), self.px_to_space(SNAP_PX), kinds=kinds,
+            from_point=self.tool.last_point) if kinds else None)
 
     def _tracked(self, wx: float, wy: float, anchor, ortho: bool):
         """Where the alignment paths put the cursor: on the nearest path
@@ -2108,7 +2156,7 @@ class ToolController(QObject):
             if anchor is not None:
                 anchor = layout_ops.paper_to_model(vp, *anchor)
             hit = engine.find(model, threshold / scale,
-                              kinds=frozenset(self.osnap_modes),
+                              kinds=self.snap_kinds(),
                               from_point=anchor)
             if hit is None:
                 continue
@@ -2483,6 +2531,16 @@ class ToolController(QObject):
             self.tool.on_enter()
             self.changed.emit()
             return True
+        if not self.tool.entity_picker:
+            # END, TAN, NONE... at a point prompt: a one-shot object snap,
+            # ahead of the command's own options (AutoCAD reads CEN at
+            # ARC's "[Center]" prompt as the snap, C as the option).
+            from core import osnap as osnap_modes
+
+            override = osnap_modes.override_from_text(stripped)
+            if override is not None:
+                self.set_osnap_override(override)
+                return True
         if self.tool.on_option(stripped):
             self._preview_now()        # a Text/Angle/Horizontal option changes the picture
             self.changed.emit()

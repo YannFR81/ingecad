@@ -393,6 +393,8 @@
   "Enter new linetype scale factor <{current}>:": "Indique el nuevo factor de escala de tipo de línea <{current}>:",
   "Enter new value ({min}-{max}):": "Indique el nuevo valor ({min}-{max}):",
   "Enter new value for SAVETIME <{v}>:": "Indique el nuevo valor de SAVETIME <{v}>:",
+  "{snap} for the next point.": "{snap} para el siguiente punto.",
+  "No object snap for the next point.": "Sin referencia a objetos para el siguiente punto.",
   "FILLET (radius {radius}) select first object or [Radius]:": "EMPALME (radio {radius}) designe el primer objeto o [Radio(R)]:",
   "Select first object:": "Designe el primer objeto:",
   "Select second object:": "Designe el segundo objeto:",

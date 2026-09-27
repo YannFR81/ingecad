@@ -344,6 +344,33 @@ class MainWindow(QMainWindow):
         self.viewport.setFocus()
 
     # -- canvas right-click (classic AutoCAD shortcut menu) ---------------------
+    def show_osnap_menu(self, global_pos) -> None:
+        """Shift + right-click during a command: the object snap menu. The
+        snap picked is for the next point only (a one-shot override)."""
+        self._osnap_menu = self.osnap_override_menu()
+        self._osnap_menu.popup(global_pos)
+
+    def osnap_override_menu(self):
+        """The Shift + right-click object snap menu, built fresh each time."""
+        from PySide6.QtWidgets import QMenu
+        from core import osnap as osnap_modes
+
+        menu = QMenu(self)
+        for mode in osnap_modes.MODES:
+            action = menu.addAction(tr(mode.label))
+            action.setEnabled(mode.available)
+            if not mode.available and mode.note:
+                action.setToolTip(tr(mode.note))
+            action.triggered.connect(
+                lambda _=False, k=mode.key: self.tools.set_osnap_override({k}))
+        menu.addSeparator()
+        menu.addAction(tr("None"),
+                       lambda: self.tools.set_osnap_override(()))
+        menu.addSeparator()
+        menu.addAction(tr("Object Snap Settings..."), self._osnap_settings)
+        menu.setToolTipsVisible(True)
+        return menu
+
     def on_canvas_right_click(self, global_pos) -> None:
         """Right-click on the canvas: Enter while a command runs, the
         shortcut menu when idle (classic AutoCAD defaults)."""

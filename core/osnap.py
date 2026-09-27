@@ -89,3 +89,34 @@ def with_off(bits: int, off: bool) -> int:
 def label_of(key: str) -> str:
     mode = BY_KEY.get(key)
     return mode.label if mode else key
+
+
+#: What a one-shot override may be typed as: the three-letter key or any
+#: longer start of the full name (END, ENDP, ENDPOINT), as AutoCAD reads
+#: them at a point prompt.
+_FULL_NAMES = {
+    "END": "ENDPOINT", "MID": "MIDPOINT", "CEN": "CENTER",
+    "GCE": "GCENTER", "NOD": "NODE", "ORI": "ORIGIN", "QUA": "QUADRANT",
+    "INT": "INTERSECTION", "EXT": "EXTENSION", "INS": "INSERTION",
+    "PER": "PERPENDICULAR", "TAN": "TANGENT", "NEA": "NEAREST",
+    "APP": "APPINT", "PAR": "PARALLEL",
+}
+
+
+def override_from_text(text: str):
+    """The one-shot object snap a typed word asks for, or None.
+
+    ``frozenset({"TAN"})`` for TAN / TANG / TANGENT (a leading ``_`` is
+    allowed), ``frozenset()`` for NON / NONE -- no snap for the next point.
+    A mode that is not implemented answers its key all the same; the
+    caller says it cannot be used.
+    """
+    word = text.strip().upper().lstrip("_")
+    if len(word) < 3:
+        return None
+    if "NONE".startswith(word):
+        return frozenset()
+    for key, full in _FULL_NAMES.items():
+        if word.startswith(key) and full.startswith(word):
+            return frozenset({key})
+    return None
