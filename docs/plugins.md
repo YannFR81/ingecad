@@ -82,7 +82,8 @@ They are the project's own, not extra ones:
    which UTM zone the drawing is in) goes into XDATA under the `INGECAD`
    APPID (`core/xdata.py` owns the name and `ensure_appid`) or the root
    dictionary's `INGECAD` dictionary. What several plugins need to agree on
-   lives in the core, once: the drawing's UTM zone, hemisphere and datum are
+   lives in the core, once: the drawing's UTM zone, hemisphere and datum (or
+   its EPSG coordinate system) are
    `core/georef.py` (`read_georef`, `SetGeorefCommand`), declared by the
    Terrain plugin's GEOREF and read by Topography's reports. The drawing
    opens in any CAD without IngeCAD.

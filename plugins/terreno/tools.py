@@ -32,7 +32,8 @@ def _in_model(document) -> bool:
 class GeorefTool(Tool):
     """GEOREF: declare the drawing's UTM zone, hemisphere and datum (or
     remove the declaration). The zone can be given, or worked out from
-    a longitude; PSAD56 asks for its shift to WGS84."""
+    a longitude; PSAD56 asks for its shift to WGS84. Coordsys takes any
+    projected coordinate system PROJ knows, by its EPSG code (#27)."""
 
     def start(self) -> None:
         self.name = "GEOREF"
@@ -42,8 +43,11 @@ class GeorefTool(Tool):
         self._zone = current.zone if current else prefs.default_zone()
         self._northern = current.northern if current else prefs.default_northern()
         self._datum = current.datum if current else "WGS84"
+        if current is not None and current.crs:
+            self._zone = prefs.default_zone()
         self._shift = (current.shift if current and current.datum != "WGS84"
                        else prefs.default_shift())
+        self._crs = current.crs if current and current.crs else ""
         if current is not None:
             self.ctx.echo(tr("Drawing georeferenced: {what}", what=actions.describe(current)))
         self._ask_zone()
@@ -51,7 +55,14 @@ class GeorefTool(Tool):
     # -- the questions, one after the other ---------------------------------------
     def _ask_zone(self) -> None:
         self._stage = "zone"
-        self.prompt("UTM zone number or [Longitude/Remove] <{zone}>:", zone=self._zone)
+        self.prompt("UTM zone number or [Longitude/Coordsys/Remove] <{zone}>:", zone=self._zone)
+
+    def _ask_crs(self) -> None:
+        self._stage = "crs"
+        if self._crs:
+            self.prompt("Coordinate system code, as EPSG:27700 <{code}>:", code=self._crs)
+        else:
+            self.prompt("Coordinate system code, as EPSG:27700:")
 
     def _ask_hemisphere(self) -> None:
         self._stage = "hemisphere"
@@ -77,6 +88,9 @@ class GeorefTool(Tool):
                 return True
             if key == "R":
                 self._remove()
+                return True
+            if key == "C":
+                self._ask_crs()
                 return True
             try:
                 zone = int(text.strip())
@@ -126,6 +140,25 @@ class GeorefTool(Tool):
             else:
                 self._ask_datum()
             return True
+        if stage == "crs":
+            if not text.strip() and self._crs:
+                self._apply_crs(self._crs)
+                return True
+            try:
+                crs = datum.check_crs(text)
+            except datum.ProjUnavailable:
+                self.ctx.echo(tr("Coordinate systems other than UTM need PROJ "
+                                 "(pyproj), which this installation lacks."))
+                self.ctx.finish()
+                return True
+            except ValueError:
+                self.ctx.echo(tr('"{code}" is not a projected coordinate system '
+                                 'PROJ knows.', code=text.strip()))
+                self._ask_crs()
+                return True
+            authority = crs.to_authority()
+            self._apply_crs(":".join(authority) if authority else text.strip())
+            return True
         if stage == "shift":
             parts = text.replace(";", ",").split(",")
             try:
@@ -157,6 +190,8 @@ class GeorefTool(Tool):
                 self._ask_shift()
         elif stage == "shift":
             self._apply()
+        elif stage == "crs":
+            self.on_option("")
         else:
             self.ctx.finish()
 
@@ -167,6 +202,13 @@ class GeorefTool(Tool):
         else:
             self.ctx.execute(actions.set_georef(document, None))
             self.ctx.echo(tr("Georeference removed."))
+        self.ctx.finish()
+
+    def _apply_crs(self, code: str) -> None:
+        document = _document(self.ctx)
+        georef = Georef(crs=code)
+        self.ctx.execute(actions.set_georef(document, georef))
+        self.ctx.echo(tr("Drawing georeferenced: {what}", what=actions.describe(georef)))
         self.ctx.finish()
 
     def _apply(self) -> None:

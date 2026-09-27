@@ -142,7 +142,7 @@ def test_georef_tool_asks_zone_hemisphere_and_datum():
     h = _Harness()
     tool = GeorefTool(h.ctx)
     tool.start()
-    assert h.prompts[-1].startswith("UTM zone number or [Longitude/Remove] <19>:")
+    assert h.prompts[-1].startswith("UTM zone number or [Longitude/Coordsys/Remove] <19>:")
     assert tool.on_option("70")                              # not a zone
     assert "1 to 60" in h.echoed[-1]
     assert tool.on_option("19")

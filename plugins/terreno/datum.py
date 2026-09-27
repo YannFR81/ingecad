@@ -3,7 +3,8 @@
 """UTM and datums without pyproj: Snyder's Transverse Mercator series on
 any ellipsoid, the geocentric three-parameter shift between datums, and
 geographic coordinates parsed and formatted the way an engineer types
-them.
+them. A drawing that declares any other coordinate system (an EPSG code,
+#27) goes through PROJ instead, grids included.
 
 Ported from IngeTrazo's ``app/georef/datum.py`` (WGS84 only there) and
 generalised to the International 1924 ellipsoid of PSAD56, the datum of
@@ -12,6 +13,7 @@ a millimetre on WGS84, and on PSAD56 through EPSG:1208's shift.
 """
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass
@@ -216,16 +218,93 @@ def from_wgs84(lat: float, lon: float, datum: str, shift) -> tuple[float, float]
 # -- the drawing's frame -----------------------------------------------------------------
 
 def drawing_to_latlon(georef: Georef, east: float, north: float) -> tuple[float, float]:
-    """A drawing point (UTM in the drawing's datum) -> WGS84 lat/lon,
-    which is what GPS, Google Earth and a KML understand."""
+    """A drawing point (UTM in the drawing's datum, or its declared
+    coordinate system) -> WGS84 lat/lon, which is what GPS, Google Earth
+    and a KML understand."""
+    if georef.crs:
+        lon, lat = _through_proj(georef.crs, east, north, inverse=False)
+        return lat, lon
     lat, lon = utm_inverse(east, north, georef.zone, georef.northern, ELLIPSOIDS[georef.datum])
     return to_wgs84(lat, lon, georef.datum, georef.shift)
 
 
 def latlon_to_drawing(georef: Georef, lat: float, lon: float) -> tuple[float, float]:
-    """WGS84 lat/lon -> the drawing's UTM coordinates in its datum."""
+    """WGS84 lat/lon -> the drawing's coordinates (UTM in its datum, or
+    its declared coordinate system)."""
+    if georef.crs:
+        return _through_proj(georef.crs, lon, lat, inverse=True)
     lat2, lon2 = from_wgs84(lat, lon, georef.datum, georef.shift)
     return utm_forward(lat2, lon2, georef.zone, georef.northern, ELLIPSOIDS[georef.datum])
+
+
+# -- any other coordinate system: PROJ ---------------------------------------------------
+
+class ProjUnavailable(RuntimeError):
+    """pyproj is not installed (a source checkout without it)."""
+
+
+def check_crs(code: str):
+    """The pyproj CRS a user typed (``EPSG:27700``, ``27700``) if it is a
+    projected system -- the drawing's coordinates are lengths -- else a
+    ValueError that says why."""
+    try:
+        from pyproj import CRS
+        from pyproj.exceptions import CRSError
+    except ImportError as exc:                    # pragma: no cover
+        raise ProjUnavailable("pyproj is not installed") from exc
+    text = code.strip()
+    if text.isdigit():
+        text = f"EPSG:{text}"
+    try:
+        crs = CRS.from_user_input(text)
+    except CRSError as exc:
+        raise ValueError(f"unknown coordinate system {code!r}") from exc
+    if not crs.is_projected:
+        raise ValueError(f"{crs.name} is not a projected coordinate system")
+    return crs
+
+
+def crs_name(code: str) -> str:
+    """``OSGB36 / British National Grid`` for ``EPSG:27700`` -- or the code
+    itself when PROJ cannot say."""
+    try:
+        return check_crs(code).name
+    except (ValueError, RuntimeError):
+        return code
+
+
+@functools.lru_cache(maxsize=16)
+def _candidates(code: str) -> tuple:
+    """Every way PROJ knows from ``code`` to WGS84 lon/lat, most accurate
+    first. The network stays on for PROJ: the best path for the British
+    National Grid is the OSTN15 grid (1 m in EPSG's catalogue, mm in
+    practice), fetched from cdn.proj.org on first use and cached; offline
+    it cannot be read, and the next path -- a Helmert shift, metres -- still
+    answers."""
+    try:
+        import warnings
+
+        from pyproj.network import set_network_enabled
+        from pyproj.transformer import TransformerGroup
+    except ImportError as exc:                    # pragma: no cover
+        raise ProjUnavailable("pyproj is not installed") from exc
+    set_network_enabled(True)
+    with warnings.catch_warnings():               # "best not available": handled below
+        warnings.simplefilter("ignore")
+        group = TransformerGroup(code, "EPSG:4326", always_xy=True)
+    return tuple(group.transformers)
+
+
+def _through_proj(code: str, x: float, y: float, inverse: bool) -> tuple[float, float]:
+    from pyproj.enums import TransformDirection
+
+    direction = TransformDirection.INVERSE if inverse else TransformDirection.FORWARD
+    for transformer in _candidates(code):
+        # a grid PROJ cannot fetch (offline) answers inf: take the next
+        a, b = transformer.transform(x, y, direction=direction)
+        if math.isfinite(a) and math.isfinite(b):
+            return a, b
+    raise ValueError(f"PROJ could not convert the point in {code}")
 
 
 # -- typed and printed coordinates ----------------------------------------------------------

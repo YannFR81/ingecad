@@ -5,7 +5,7 @@
   "Drawing georeferenced: {what}": "Dibujo georreferenciado: {what}",
   "{datum}, UTM zone {zone}": "{datum}, zona UTM {zone}",
   "{datum}, UTM zone {zone} (shift to WGS84 {dx:g}, {dy:g}, {dz:g} m)": "{datum}, zona UTM {zone} (desplazamiento a WGS84 {dx:g}, {dy:g}, {dz:g} m)",
-  "UTM zone number or [Longitude/Remove] <{zone}>:": "Número de zona UTM o [Longitud(L)/Quitar(R)] <{zone}>:",
+  "UTM zone number or [Longitude/Coordsys/Remove] <{zone}>:": "Número de zona UTM o [Longitud(L)/sistema de Coordenadas(C)/Quitar(R)] <{zone}>:",
   "Hemisphere [North/South] <{default}>:": "Hemisferio [Norte(N)/Sur(S)] <{default}>:",
   "North": "Norte",
   "South": "Sur",
@@ -105,5 +105,10 @@
   "Layer {layer}": "Capa {layer}",
   "{layer_note}. Area {area:.2f} m², perimeter {per:.2f} m": "{layer_note}. Área {area:.2f} m², perímetro {per:.2f} m",
   "{layer_note}. Length {length:.2f} m": "{layer_note}. Longitud {length:.2f} m",
-  " (hole)": " (hueco)"
+  " (hole)": " (hueco)",
+  "\"{code}\" is not a projected coordinate system PROJ knows.": "\"{code}\" no es un sistema de coordenadas proyectado que PROJ conozca.",
+  "Coordinate system code, as EPSG:27700 <{code}>:": "Código del sistema de coordenadas, como EPSG:27700 <{code}>:",
+  "Coordinate system code, as EPSG:27700:": "Código del sistema de coordenadas, como EPSG:27700:",
+  "Coordinate systems other than UTM need PROJ (pyproj), which this installation lacks.": "Los sistemas de coordenadas distintos de UTM necesitan PROJ (pyproj), que esta instalación no tiene.",
+  "{code}, {name}": "{code}, {name}"
 }

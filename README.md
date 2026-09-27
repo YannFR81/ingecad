@@ -41,7 +41,9 @@ What works today:
   profiles, cross sections, earthworks, platforms with slopes to daylight
   and exact volumes — all plain DXF that any CAD opens.
 - **Terrain plugin** (menu *Terrain*): georeference the drawing (UTM zone,
-  WGS84 or PSAD56), read or type latitude and longitude, ground elevations
+  WGS84 or PSAD56, or any projected coordinate system by its EPSG code —
+  the British National Grid is `EPSG:27700` — through PROJ), read or type
+  latitude and longitude, ground elevations
   from a global DEM, the satellite image under the plan, and Google Earth
   both ways by KML/KMZ. Plugins are managed in Tools ▸ Plugins; the
   contract for writing one is in `docs/plugins.md`.

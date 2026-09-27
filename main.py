@@ -197,6 +197,22 @@ def _self_check() -> int:
             print(f"  {label:<14}: MISSING  {module}: {exc}")
             problems.append(label)
 
+    # PROJ answers for any coordinate system a drawing declares (#27):
+    # its database has to have travelled with the package, not just the
+    # module -- a conversion is the only proof.
+    try:
+        import pyproj
+
+        east, _north = pyproj.Transformer.from_crs(
+            "EPSG:4326", "EPSG:32719", always_xy=True).transform(-69.0, -16.0)
+        if abs(east - 500000.0) > 1.0:
+            raise ValueError(f"UTM 19 S central meridian at {east:.1f}")
+        print(f"  {'PROJ':<14}: ok  (PROJ {pyproj.proj_version_str}, "
+              f"pyproj {pyproj.__version__})")
+    except Exception as exc:  # noqa: BLE001 - report whatever it is
+        print(f"  {'PROJ':<14}: MISSING  {exc}")
+        problems.append("PROJ")
+
     for label, finder in (("dwg2dxf", find_dwg2dxf), ("dxf2dwg", find_dxf2dwg)):
         tool = finder()
         where = "bundled" if tool and str(tool).startswith(str(root)) else "system PATH"

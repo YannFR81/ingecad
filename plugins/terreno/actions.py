@@ -33,7 +33,10 @@ def set_georef(document, georef: Georef | None) -> SetGeorefCommand:
 
 def describe(georef: Georef) -> str:
     """``WGS84, UTM zone 19 S`` in the interface language -- and, for a
-    datum that has one, its shift."""
+    datum that has one, its shift; for a declared coordinate system, its
+    code and name (``EPSG:27700, OSGB36 / British National Grid``)."""
+    if georef.crs:
+        return tr("{code}, {name}", code=georef.crs, name=datum.crs_name(georef.crs))
     if georef.datum == "WGS84":
         return tr("{datum}, UTM zone {zone}", datum=georef.datum, zone=georef.zone_label())
     dx, dy, dz = georef.shift

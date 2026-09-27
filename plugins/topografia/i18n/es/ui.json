@@ -249,5 +249,6 @@
   "AREAS BY LOT": "ÁREAS POR LOTE",
   "LOT": "LOTE",
   "AREA (m²)": "ÁREA (m²)",
-  "PERIMETER (m)": "PERÍMETRO (m)"
+  "PERIMETER (m)": "PERÍMETRO (m)",
+  "TECHNICAL DATA (coordinate system {crs})": "DATOS TÉCNICOS (sistema de coordenadas {crs})"
 }

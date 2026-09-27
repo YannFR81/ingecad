@@ -79,8 +79,11 @@ class Memoria:
                             length=b.length, side=b.side, bearing=b.bearing))
         lines += ["", tr("AREA: {area:.2f} m²", area=self.area),
                   tr("PERIMETER: {per:.2f} m", per=self.perimeter), ""]
-        lines.append(tr("TECHNICAL DATA (datum {datum}, UTM zone {zone})",
-                        datum=self.datum, zone=self.zone))
+        if self.zone:
+            lines.append(tr("TECHNICAL DATA (datum {datum}, UTM zone {zone})",
+                            datum=self.datum, zone=self.zone))
+        else:
+            lines.append(tr("TECHNICAL DATA (coordinate system {crs})", crs=self.datum))
         header = [tr("VERTEX"), tr("SIDE"), tr("DISTANCE"), tr("BEARING"),
                   tr("INTERIOR ANGLE"), tr("EAST"), tr("NORTH")]
         widths = [8, 9, 11, 18, 16, 12, 13]

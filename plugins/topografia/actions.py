@@ -1504,6 +1504,10 @@ def memoria_for(document, entity, name: str, location: str, front: int = 0,
     from core.georef import read_georef
 
     declared = read_georef(document.doc)
+    if declared is not None and declared.crs:
+        # a declared coordinate system names itself; there is no UTM zone
+        zone = "" if zone is None else zone
+        datum = declared.crs if datum is None else datum
     if zone is None:
         zone = declared.zone_label() if declared else "19 S"
     if datum is None:

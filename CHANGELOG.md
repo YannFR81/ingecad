@@ -21,6 +21,15 @@
   layer in one undo step, and lock or unlock a layer by picking one of
   its objects -- LAYULK reaches objects on the locked layer itself.
 
+### Georeferencing
+- **Any projected coordinate system, through PROJ** (#27). GEOREF's new
+  *Coordsys* option takes an EPSG code — `27700` for the British National
+  Grid — and every conversion (LATLON, KML, the DEM, the satellite image)
+  goes through PROJ with its grids: OSTN15 is fetched on first use and
+  cached, and offline the next most accurate path answers. UTM on WGS84 or
+  PSAD56 keeps IngeCAD's own maths, which PROJ matches to a nanodegree.
+  pyproj (≈34 MB) now ships in every package; `--check` proves it converts.
+
 ### Fixes
 - **The grid no longer flickers when zooming or panning.** The frame that
   rebuilt the grid (the first after F7, a wheel notch or a pan across a
