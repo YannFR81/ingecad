@@ -1213,6 +1213,9 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _=False, c=code: self._set_language(c))
             lang_group.addAction(act)
             lang_menu.addAction(act)
+        customize_menu = tools_menu.addMenu(tr("Customize"))
+        item(customize_menu, tr("Edit Program Parameters (acad.pgp)"),
+             self._cmd_edit_pgp)
         tools_menu.addSeparator()
         # Where the classic pre-ribbon AutoCAD kept them, and Options the
         # last entry of the menu as it has always been.
@@ -2786,6 +2789,7 @@ class MainWindow(QMainWindow):
         d.register("DRAWINGRECOVERY", self._cmd_drawing_recovery)
         d.register("SAVETIME", self._cmd_savetime)
         d.register("MIRRTEXT", self._cmd_mirrtext)
+        d.register("REINIT", self._cmd_reinit)
         d.register("PSPACE", self._cmd_pspace)
         d.register("VPLOCK", self._cmd_vplock)
         d.register("PAGESETUP", self._cmd_pagesetup)
@@ -4154,6 +4158,37 @@ class MainWindow(QMainWindow):
         if not self.maybe_save_changes():
             return
         offer_recovery(self)
+
+    def _cmd_edit_pgp(self, *args) -> None:
+        """Tools > Customize > Edit Program Parameters (acad.pgp): open the
+        user's alias file in the system editor, creating it the first time."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from core import aliases as aliases_mod
+
+        path = aliases_mod.user_pgp_path()
+        try:
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(aliases_mod.starter_pgp(), encoding="utf-8")
+        except OSError as exc:
+            self.command_line.echo(
+                tr("Cannot create {path}: {error}", path=str(path),
+                   error=str(exc)))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        self.command_line.echo(
+            tr("Editing {path}. Type REINIT after saving it to use the "
+               "changes.", path=str(path)))
+
+    def _cmd_reinit(self, *args) -> None:
+        """REINIT: read acad.pgp again, so edited aliases work at once."""
+        from core import aliases as aliases_mod
+
+        self.dispatcher.aliases = aliases_mod.load_aliases()
+        self.command_line.echo(
+            tr("Program parameters (acad.pgp) reloaded: {n} aliases.",
+               n=len(self.dispatcher.aliases)))
 
     def _cmd_mirrtext(self, *args) -> Prompt | None:
         """MIRRTEXT — 0 keeps mirrored text readable, 1 mirrors it (saved in

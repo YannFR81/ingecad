@@ -134,6 +134,7 @@ def set_language(lang: str) -> None:
             names.setdefault(token, english)
     _catalog = catalog
     _command_names = names
+    _every_command_name.clear()      # packs or language changed: recompute
 
 
 def current_language() -> str:
@@ -147,6 +148,32 @@ def command_names() -> dict[str, str]:
     ``commands.json`` -- which is most of them, and perfectly fine.
     """
     return _command_names
+
+
+def every_command_name() -> dict[str, str]:
+    """``{localized name: English command}`` across every installed pack.
+
+    What an alias target is looked up in: a Spanish AutoCAD ``acad.pgp``
+    says ``DE, *DESPLAZA`` whatever language the interface is in. The
+    active language comes first; no pack may shadow an English name.
+    """
+    if _every_command_name:
+        return _every_command_name
+    names = dict(_command_names)
+    for code, pack in sorted(language_packs().items()):
+        for token, english in _commands.table(pack).items():
+            names.setdefault(token, english)
+        for root in _pack_dirs:
+            extra = extra_pack(root, code)
+            if extra is not None:
+                for token, english in _commands.table(extra).items():
+                    names.setdefault(token, english)
+    _every_command_name.update(names)
+    return _every_command_name
+
+
+#: every_command_name()'s answer, until the language or the packs change.
+_every_command_name: dict[str, str] = {}
 
 
 def tr(text: str, /, **kwargs) -> str:

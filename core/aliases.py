@@ -135,15 +135,46 @@ def user_pgp_path() -> Path:
     return Path.home() / ".config" / "IngeCAD" / "acad.pgp"
 
 
+def starter_pgp() -> str:
+    """The file Tools > Customize > Edit Program Parameters creates when
+    there is none yet: the syntax, and the stock aliases to edit."""
+    lines = [
+        "; IngeCAD - program parameters (acad.pgp), same syntax as AutoCAD's.",
+        ";",
+        ";   ALIAS,  *COMMAND",
+        ";",
+        "; COMMAND may be an English command name (MOVE) or a localized one",
+        "; (DESPLAZA), so a Spanish AutoCAD acad.pgp works as it is. Lines",
+        "; starting with ; are comments. Type REINIT after saving this file",
+        "; to use the changes without restarting IngeCAD.",
+        ";",
+        "; The stock aliases:",
+    ]
+    width = max(len(alias) for alias in DEFAULT_ALIASES) + 1
+    for alias, command in DEFAULT_ALIASES.items():
+        lines.append(f"{alias + ',':<{width + 1}} *{command}")
+    return "\n".join(lines) + "\n"
+
+
 def load_aliases(pgp_path: Path | None = None) -> dict[str, str]:
     """Stock aliases overlaid with the user's PGP file, if present."""
     aliases = dict(DEFAULT_ALIASES)
     path = pgp_path or user_pgp_path()
     try:
-        aliases.update(parse_pgp(path.read_text(encoding="utf-8", errors="replace")))
+        aliases.update(parse_pgp(read_pgp(path)))
     except OSError:
         pass
     return aliases
+
+
+def read_pgp(path: Path) -> str:
+    """A PGP file's text. AutoCAD writes them in ANSI (cp1252); a file
+    saved as UTF-8 is read as such, anything else as cp1252."""
+    data = path.read_bytes()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace")
 
 
 def resolve(token: str, aliases: dict[str, str]) -> str:

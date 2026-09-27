@@ -71,7 +71,8 @@ class Dispatcher:
         LINEA complete as they type -- without ever losing LINE or L.
         """
         names = set(self._commands)
-        names.update(a for a, cmd in self.aliases.items() if cmd in self._commands)
+        names.update(a for a, cmd in self.aliases.items()
+                     if self._alias_target(cmd) in self._commands)
         names.update(token for token, cmd in i18n.command_names().items()
                      if cmd in self._commands)
         return sorted(names)
@@ -132,11 +133,24 @@ class Dispatcher:
         name = self._english_name(text, complete=False)
         if name in self._commands:
             return name
+        if text.upper() in self.aliases:
+            # An alias names its command outright: a Spanish acad.pgp says
+            # "DE, *DESPLAZA". Its target is looked up in every language,
+            # and a target that is no command is reported as such -- never
+            # completed from the letters typed into some other command.
+            return self._alias_target(name)
         localized = i18n.command_names().get(text.upper())
         if localized in self._commands:
             return localized
         completed = self._complete(text)
         return completed if completed else name
+
+    def _alias_target(self, target: str) -> str:
+        """An alias's target as a command: English, else any language's."""
+        if target in self._commands:
+            return target
+        english = i18n.every_command_name().get(target)
+        return english if english in self._commands else target
 
     def _english_name(self, token: str, complete: bool = True) -> str:
         """Alias or command name, English only — what ``_`` forces."""

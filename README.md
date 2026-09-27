@@ -66,7 +66,9 @@ What works today:
   DWG r2000 (LibreDWG, bundled), with a silent verified-save check.
 - **Classic interface**: command line at the bottom with AutoCAD aliases
   (`L`, `C`, `M`, `TR`, `Z`+`E` …), dark model space, dockable Layers /
-  Properties / Styles panels.
+  Properties / Styles panels. Your own aliases go in `acad.pgp`, same syntax
+  as AutoCAD's (*Tools ▸ Customize ▸ Edit Program Parameters*, then
+  `REINIT`); a Spanish AutoCAD file works as it is (`DE, *DESPLAZA`).
 - **Paper space like AutoCAD**: Model/Layout tabs and **the sheet itself is
   editable** — draw, move, erase, trim, scale and edit the text of a title
   block with the commands you already know, in paper millimetres. Plus MVIEW
