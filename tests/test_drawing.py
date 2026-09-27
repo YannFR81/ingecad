@@ -246,7 +246,8 @@ def test_modes_that_are_not_implemented_are_never_returned_as_running():
     every_bit = sum(mode.bit for mode in osnap.MODES)
     running = osnap.from_bits(every_bit)
     assert running == osnap.AVAILABLE
-    assert "EXT" not in running and "PAR" not in running
+    assert "APP" not in running           # the one still to come (#7)
+    assert "EXT" in running and "PAR" in running
 
 
 def test_the_engine_only_offers_the_modes_it_is_asked_for():

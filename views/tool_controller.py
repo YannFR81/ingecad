@@ -341,6 +341,17 @@ class ToolController(QObject):
         self._track_timer.setSingleShot(True)
         self._track_timer.setInterval(self.TRACK_DWELL_MS)
         self._track_timer.timeout.connect(self.acquire_now)
+        # EXT and PAR: tracking snaps. Pausing on the end of a line or arc
+        # (EXT) or on a line (PAR, once there is a first point) acquires it;
+        # the cursor then locks onto the extension, or onto the parallel
+        # through the last point.
+        self._ext_sources: list = []
+        self._par_dirs: list = []
+        self._xp_candidate = None
+        self._xp_timer = QTimer(self)
+        self._xp_timer.setSingleShot(True)
+        self._xp_timer.setInterval(self.TRACK_DWELL_MS)
+        self._xp_timer.timeout.connect(self.acquire_tracking_snap)
         # DYN / F12: dynamic input -- the prompt and the live coordinates
         # beside the cursor, and bare coordinates relative after a first point
         self.dyn_on = False
@@ -1634,6 +1645,7 @@ class ToolController(QObject):
         if not inside:
             needs_snap = False    # over the paper, outside the viewport
         kinds = self.snap_kinds()
+        self.track_hint = None
         if needs_snap and self.snap_engine is not None and kinds:
             self.snap_hit = self.snap_engine.find(
                 (wx, wy), threshold_world,
@@ -1646,6 +1658,11 @@ class ToolController(QObject):
                     or math.hypot(through.x - wx, through.y - wy)
                     < math.hypot(self.snap_hit.x - wx, self.snap_hit.y - wy)):
                 self.snap_hit = through
+        if needs_snap and self.snap_engine is not None and (
+                kinds & {"EXT", "PAR"}):
+            self._watch_tracking_snap(wx, wy, threshold_world, kinds)
+            if self.snap_hit is None:
+                self.snap_hit = self._tracking_snap_hit(wx, wy, threshold_world)
         self._track_tolerance = threshold_world
         self._watch_for_acquisition()
         self._sync_ghost(wx, wy)
@@ -1684,10 +1701,112 @@ class ToolController(QObject):
         self.changed.emit()
 
     def track_points(self) -> list:
-        """The acquired points, ``(x, y, kind)``, for the overlay."""
-        return list(self._track_points)
+        """The acquired points, ``(x, y, kind)``, for the overlay: object
+        snap tracking's (with OTRACK on) and the ends acquired for EXT."""
+        points = list(self._track_points) if self.otrack_on else []
+        for source in self._ext_sources:
+            end = source[1] if source[0] == "line" else source[3]
+            points.append((end[0], end[1], "EXT"))
+        return points
+
+    # -- EXT and PAR -----------------------------------------------------------
+    def _watch_tracking_snap(self, wx, wy, threshold, kinds) -> None:
+        """Start the dwell on an end (EXT) or a line (PAR) under the cursor."""
+        candidate = None
+        if "EXT" in kinds:
+            source = self.snap_engine.extension_source((wx, wy), threshold)
+            if source is not None:
+                candidate = ("EXT", source)
+        if candidate is None and "PAR" in kinds and self.tool is not None \
+                and self.tool.last_point is not None:
+            direction = self.snap_engine.line_direction((wx, wy), threshold)
+            if direction is not None:
+                candidate = ("PAR", direction)
+        if candidate is None:
+            self._xp_candidate = None
+            self._xp_timer.stop()
+            return
+        if candidate != self._xp_candidate:
+            self._xp_candidate = candidate
+            self._xp_timer.start()
+
+    def acquire_tracking_snap(self) -> None:
+        """The dwell elapsed: acquire the end or the direction under the
+        cursor -- or let it go if it was acquired already, like OTRACK."""
+        candidate = self._xp_candidate
+        if candidate is None:
+            return
+        kind, data = candidate
+        pool = self._ext_sources if kind == "EXT" else self._par_dirs
+        if kind == "PAR":
+            same = [d for d in pool
+                    if abs(d[0] * data[1] - d[1] * data[0]) < 1e-9]
+        else:
+            same = [d for d in pool if d == data]
+        for d in same:
+            pool.remove(d)
+        if not same:
+            pool.append(data)
+        self.changed.emit()
+
+    def _tracking_snap_hit(self, wx, wy, threshold):
+        """The cursor on an acquired extension or parallel: the point on
+        it, with AutoCAD's tooltip ("Extension: 5.0000 < 0°")."""
+        best = None
+
+        def offer(kind, point, source, along, direction, label):
+            nonlocal best
+            d = math.hypot(point[0] - wx, point[1] - wy)
+            if d <= threshold and (best is None or d < best[0]):
+                best = (d, kind, point, source, along, direction, label)
+
+        for src in self._ext_sources:
+            if src[0] == "line":
+                (ex, ey), (ux, uy) = src[1], src[2]
+                along = (wx - ex) * ux + (wy - ey) * uy
+                if along > 0:
+                    offer("EXT", (ex + along * ux, ey + along * uy), (ex, ey),
+                          along, math.atan2(uy, ux), "Extension")
+            else:
+                (cx, cy), r, end, a0, a1 = src[1], src[2], src[3], src[4], src[5]
+                ang = math.atan2(wy - cy, wx - cx)
+                rel = (ang - a0) % math.tau
+                if rel > (a1 - a0) % math.tau + 1e-12:  # past the arc's ends
+                    point = (cx + r * math.cos(ang), cy + r * math.sin(ang))
+                    offer("EXT", point, end,
+                          math.hypot(point[0] - end[0], point[1] - end[1]),
+                          math.atan2(point[1] - end[1], point[0] - end[0]),
+                          "Extension")
+        anchor = self.tool.last_point if self.tool is not None else None
+        if anchor is not None:
+            for ux, uy in self._par_dirs:
+                along = (wx - anchor[0]) * ux + (wy - anchor[1]) * uy
+                point = (anchor[0] + along * ux, anchor[1] + along * uy)
+                offer("PAR", point, anchor, abs(along),
+                      math.atan2(uy, ux) if along >= 0
+                      else math.atan2(-uy, -ux), "Parallel")
+        if best is None:
+            return None
+        _d, kind, point, source, along, direction, label = best
+        self.track_hint = (source, point,
+                           f"{tr(label)}: {self._length_text(along)} < "
+                           f"{math.degrees(direction) % 360:.0f}°")
+        return SnapHit(point[0], point[1], kind)
+
+    def _length_text(self, value: float) -> str:
+        from core import units as units_mod
+
+        try:
+            u = self.units()
+            return units_mod.format_length(value, u.lunits, u.luprec)
+        except Exception:  # noqa: BLE001
+            return f"{value:.4f}"
 
     def clear_tracking(self) -> None:
+        self._ext_sources = []
+        self._par_dirs = []
+        self._xp_candidate = None
+        self._xp_timer.stop()
         self._track_points = []
         self._track_candidate = None
         self._track_timer.stop()

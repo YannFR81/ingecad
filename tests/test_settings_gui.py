@@ -193,10 +193,11 @@ def test_the_osnap_menu_lists_every_mode_in_autocads_order(win):
     dialog = OsnapSettingsDialog(win, win.tools.osnap_modes, True)
     try:
         assert list(dialog.panel._boxes) == [m.key for m in osnap_modes.MODES]
-        # The three we cannot do yet are listed, disabled, with a reason.
-        for key in ("EXT", "APP", "PAR"):
-            box = dialog.panel._boxes[key]
-            assert not box.isEnabled() and box.toolTip()
+        # The one we cannot do yet is listed, disabled, with a reason.
+        box = dialog.panel._boxes["APP"]
+        assert not box.isEnabled() and box.toolTip()
+        for key in ("EXT", "PAR"):
+            assert dialog.panel._boxes[key].isEnabled()
         assert "END" in dialog.modes()
     finally:
         dialog.deleteLater()

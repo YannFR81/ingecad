@@ -46,16 +46,14 @@ MODES: tuple[Mode, ...] = (
     Mode("ORI", 65536, "Origin"),
     Mode("QUA", 16, "Quadrant"),
     Mode("INT", 32, "Intersection"),
-    Mode("EXT", 4096, "Extension", False,
-         "Extension tracking is not implemented yet."),
+    Mode("EXT", 4096, "Extension"),
     Mode("INS", 64, "Insertion"),
     Mode("PER", 128, "Perpendicular"),
     Mode("TAN", 256, "Tangent"),
     Mode("NEA", 512, "Nearest"),
     Mode("APP", 2048, "Apparent Intersection", False,
          "Apparent intersection is not implemented yet."),
-    Mode("PAR", 8192, "Parallel", False,
-         "Parallel tracking is not implemented yet."),
+    Mode("PAR", 8192, "Parallel"),
 )
 
 BY_KEY = {mode.key: mode for mode in MODES}

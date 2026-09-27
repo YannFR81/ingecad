@@ -375,3 +375,98 @@ def test_snap_menu_is_in_autocads_order(qapp):
         win.tools.cancel()
         win.document.dirty = False
         win.close()
+
+
+# -- EXT and PAR: tracking snaps ---------------------------------------------
+
+def _length(win, value):
+    """A length as the drawing's units print it (LUNITS/LUPREC)."""
+    from core import units
+
+    u = win.display_units()
+    return units.format_length(value, u.lunits, u.luprec)
+
+
+def _tracking_window(qapp, modes):
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document()
+    msp = win.document.modelspace()
+    msp.add_line((0, 0), (10, 0))
+    msp.add_arc((50, 0), 10, 0, 90)
+    win.tools._invalidate_geometry()
+    win.tools.osnap_modes = set(modes)
+    return win
+
+
+def test_extension_follows_a_line_past_its_end(qapp):
+    import pytest
+
+    win = _tracking_window(qapp, {"EXT"})
+    tools = win.tools
+    try:
+        win._on_command_submitted("LINE")
+        tools.on_hover(10.2, 0.1, threshold_world=1.0)   # pause on the end
+        tools.acquire_tracking_snap()
+        assert (10.0, 0.0, "EXT") in tools.track_points()
+        tools.on_hover(15, 0.3, threshold_world=1.0)
+        assert tools.snap_hit.kind == "EXT"
+        assert (tools.snap_hit.x, tools.snap_hit.y) == pytest.approx((15, 0))
+        assert tools.track_hint[2] == f"Extension: {_length(win, 5)} < 0°"
+        tools.on_hover(5, 0.3, threshold_world=1.0)      # back over the line
+        assert tools.snap_hit is None or tools.snap_hit.kind != "EXT"
+        tools.on_hover(15, 0.3, threshold_world=1.0)
+        tools.on_click(15, 0.3)
+        assert tools.tool.last_point == pytest.approx((15, 0))
+        assert tools.track_points() == []                # released by the point
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()
+
+
+def test_extension_of_an_arc_runs_along_its_circle(qapp):
+    import math
+
+    import pytest
+
+    win = _tracking_window(qapp, {"EXT"})
+    tools = win.tools
+    try:
+        win._on_command_submitted("LINE")
+        tools.on_hover(50.1, 10.1, threshold_world=1.0)  # the 90° end
+        tools.acquire_tracking_snap()
+        x = 50 + 10.2 * math.cos(math.radians(120))
+        y = 10.2 * math.sin(math.radians(120))
+        tools.on_hover(x, y, threshold_world=1.0)
+        assert tools.snap_hit.kind == "EXT"
+        assert math.hypot(tools.snap_hit.x - 50, tools.snap_hit.y) \
+            == pytest.approx(10)
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()
+
+
+def test_parallel_from_the_last_point(qapp):
+    import pytest
+
+    win = _tracking_window(qapp, {"PAR"})
+    tools = win.tools
+    try:
+        win._on_command_submitted("LINE")
+        tools.on_hover(5, 0.1, threshold_world=1.0)      # no first point yet
+        tools.acquire_tracking_snap()
+        assert tools._par_dirs == []                     # PAR needs one
+        win._on_command_submitted("0,10")
+        tools.on_hover(5, 0.1, threshold_world=1.0)      # pause on the line
+        tools.acquire_tracking_snap()
+        tools.on_hover(8, 10.3, threshold_world=1.0)
+        assert tools.snap_hit.kind == "PAR"
+        assert (tools.snap_hit.x, tools.snap_hit.y) == pytest.approx((8, 10))
+        assert tools.track_hint[2] == f"Parallel: {_length(win, 8)} < 0°"
+    finally:
+        tools.cancel()
+        win.document.dirty = False
+        win.close()

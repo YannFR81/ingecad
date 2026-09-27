@@ -1666,8 +1666,7 @@ class Viewport(QOpenGLWidget):
         rides an alignment path, the dashed path from its point through the
         cursor and a little past it, with AutoCAD's tooltip."""
         hint = getattr(delegate, "track_hint", None)
-        points = delegate.track_points() \
-            if getattr(delegate, "otrack_on", False) else []
+        points = delegate.track_points()    # OTRACK's and EXT's acquired
         if not points and hint is None:
             return       # a polar lock shows its path with OTRACK off too
         p.save()
@@ -1798,6 +1797,12 @@ class Viewport(QOpenGLWidget):
             if kind == "DTAN":           # deferred: three dots beside it
                 for i in range(3):
                     p.drawPoint(QPointF(x + s + 3 + 3 * i, y + s))
+        elif kind == "EXT":     # AutoCAD's Extension glyph: a dotted run
+            for i in range(-2, 3):
+                p.drawEllipse(QPointF(x + i * 0.45 * s, y), 0.8, 0.8)
+        elif kind == "PAR":     # AutoCAD's Parallel glyph: two slashes
+            p.drawLine(QPointF(x - s, y + s * 0.6), QPointF(x - s * 0.2, y - s * 0.6))
+            p.drawLine(QPointF(x + s * 0.2, y + s * 0.6), QPointF(x + s, y - s * 0.6))
         elif kind == "QUA":     # diamond
             p.drawPolygon([QPointF(x, y - s), QPointF(x + s, y),
                            QPointF(x, y + s), QPointF(x - s, y)])

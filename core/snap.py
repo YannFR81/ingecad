@@ -518,6 +518,71 @@ class SnapEngine:
                 setattr(self, oidx_name, oidx[k])
 
     # -- query ----------------------------------------------------------------
+    # -- tracking sources: Extension and Parallel ---------------------------
+    def extension_source(self, cursor, threshold: float):
+        """The end of a line or an arc under the cursor, for EXT: either
+        ``("line", end, unit)`` -- the direction leading out of the line at
+        that end -- or ``("arc", center, radius, end, a0, a1)``. None if
+        none. Vectorized: it runs on every mouse move."""
+        if self._dirty:
+            self._build()
+        cx, cy = cursor
+        best = None
+        segs = self._segs
+        if len(segs):
+            for end, other in ((slice(2, 4), slice(0, 2)),
+                               (slice(0, 2), slice(2, 4))):
+                e, o = segs[:, end], segs[:, other]
+                d = np.hypot(e[:, 0] - cx, e[:, 1] - cy)
+                length = np.hypot(e[:, 0] - o[:, 0], e[:, 1] - o[:, 1])
+                d = np.where(length > 1e-12, d, np.inf)
+                i = int(np.argmin(d))
+                if d[i] <= threshold and (best is None or d[i] < best[0]):
+                    unit = ((e[i, 0] - o[i, 0]) / length[i],
+                            (e[i, 1] - o[i, 1]) / length[i])
+                    best = (float(d[i]), ("line", (float(e[i, 0]),
+                                                   float(e[i, 1])), unit))
+        arcs = self._arcs
+        if len(arcs):
+            for col in (3, 4):
+                ex = arcs[:, 0] + arcs[:, 2] * np.cos(arcs[:, col])
+                ey = arcs[:, 1] + arcs[:, 2] * np.sin(arcs[:, col])
+                d = np.hypot(ex - cx, ey - cy)
+                i = int(np.argmin(d))
+                if d[i] <= threshold and (best is None or d[i] < best[0]):
+                    row = arcs[i]
+                    best = (float(d[i]), ("arc", (float(row[0]), float(row[1])),
+                                          float(row[2]),
+                                          (float(ex[i]), float(ey[i])),
+                                          float(row[3]), float(row[4])))
+        return best[1] if best else None
+
+    def line_direction(self, cursor, threshold: float):
+        """The unit direction of the straight segment under the cursor, for
+        PAR, or None."""
+        if self._dirty:
+            self._build()
+        if not len(self._segs):
+            return None
+        cx, cy = cursor
+        b = self._seg_bounds
+        near = ((b[:, 0] - threshold <= cx) & (b[:, 2] + threshold >= cx)
+                & (b[:, 1] - threshold <= cy) & (b[:, 3] + threshold >= cy))
+        segs = self._segs[near]
+        if not len(segs):
+            return None
+        dx, dy = segs[:, 2] - segs[:, 0], segs[:, 3] - segs[:, 1]
+        l2 = dx * dx + dy * dy
+        t = np.clip(((cx - segs[:, 0]) * dx + (cy - segs[:, 1]) * dy)
+                    / np.where(l2 > 0, l2, 1.0), 0.0, 1.0)
+        d = np.hypot(segs[:, 0] + t * dx - cx, segs[:, 1] + t * dy - cy)
+        d = np.where(l2 > 1e-24, d, np.inf)
+        i = int(np.argmin(d))
+        if d[i] > threshold:
+            return None
+        length = math.sqrt(l2[i])
+        return (float(dx[i] / length), float(dy[i] / length))
+
     def find(
         self,
         cursor: tuple[float, float],
