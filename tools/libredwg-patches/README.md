@@ -65,6 +65,13 @@ proxy's graphics, and ODA/AutoCAD refused many of them outright
   from `dwg_versions[]`, and the encoder clamps an object newer than the
   target to the target's version.
 
+- **A large preview was written without its bytes (`common_entity_data.spec`).**
+  The `preview_size < obj->size` bound belongs to the reader; in the encoder
+  `obj->size` is not known yet, so a proxy with 185 KB of graphics had its
+  size written and its bytes skipped, and every object after it was
+  misread (0619: 3112 entities came back as 78, ODA refused the file). The
+  bound is now the decoder's only.
+
 Measured: `make check` 270/0; `dwg2dxf` old vs new over the 262 proxy
 drawings: same entities in all, decoded proxy graphics equal in 243 and
 more in 10, fewer in none; letrina 0028: 128 graphic entities → ODA reads

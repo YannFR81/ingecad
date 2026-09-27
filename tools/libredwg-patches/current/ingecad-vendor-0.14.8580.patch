@@ -1681,6 +1681,23 @@ index 1ef75a1c..cc1a329f 100644
        {
          // was DXF 160 (used for block previews?).
          // 92 also for all PROXY vector preview data with klass->is_zombie
+@@ -322,8 +327,14 @@
+             FIELD_BLL (preview_size, 160);
+           }
+ #endif
+-        if ((int64_t)_ent->preview_size >= 0 &&
+-            _ent->preview_size < (obj->size ? obj->size : dat->size))
++        // Only a reader can bound the preview by the object's size. The
++        // encoder does not know that size yet, and refusing there wrote the
++        // size without its bytes: every object after it was misread.
++        if ((int64_t)_ent->preview_size >= 0
++#ifdef IS_DECODER
++            && _ent->preview_size < (obj->size ? obj->size : dat->size)
++#endif
++        )
+           {
+             FIELD_BINARY (preview, _ent->preview_size, 310);
+           }
 --- a/src/dwg.spec
 +++ b/src/dwg.spec
 @@ -5629,23 +5629,55 @@
