@@ -276,92 +276,20 @@ def test_discard_temp_dxf_only_touches_our_own_directories(tmp_path):
     assert not ours.exists()
 
 
-# ---- Open CAD Studio, the second satellite ----------------------------------
+# ---- LibreDWG is the only satellite -----------------------------------------
 
-def _fake_ocs(tmp_path, monkeypatch):
-    """A stand-in for ``OpenCADStudio --export src dst`` that copies the
-    source and stamps a marker (the extension decides the 'format')."""
-    exe = tmp_path / "OpenCADStudio"
-    exe.write_text("#!/bin/sh\n[ \"$1\" = --export ] || exit 2\ncp \"$2\" \"$3\" && printf 'OCS ' >> \"$3.marker\"\n",
-                   encoding="utf-8")
-    exe.chmod(0o755)
-    monkeypatch.setenv("INGECAD_OPENCADSTUDIO", str(exe))
-    return exe
-
-
-def test_open_cad_studio_is_found_through_the_environment(tmp_path, monkeypatch):
-    monkeypatch.delenv("INGECAD_OPENCADSTUDIO", raising=False)
-    monkeypatch.setattr(dwg_bridge.shutil, "which", lambda n: None)
-    monkeypatch.setattr(dwg_bridge.Path, "home", staticmethod(lambda: tmp_path / "nohome"))
-    assert dwg_bridge.find_opencadstudio() is None
-    exe = _fake_ocs(tmp_path, monkeypatch)
-    assert dwg_bridge.find_opencadstudio() == exe
-    names = [n for n, _p in dwg_bridge.converters_status()]
-    assert "Open CAD Studio" in names
-
-
-def test_open_cad_studio_reads_when_libredwg_is_missing(tmp_path, monkeypatch):
-    exe = _fake_ocs(tmp_path, monkeypatch)
+def test_without_libredwg_there_is_no_dwg_support(tmp_path, monkeypatch):
     monkeypatch.setattr(dwg_bridge, "find_dwg2dxf", lambda: None)
     monkeypatch.setattr(dwg_bridge, "find_dxf2dwg", lambda: None)
-    assert dwg_bridge.have_dwg_support()
+    assert not dwg_bridge.have_dwg_support()
+    assert dwg_bridge.dwg_write_engine("r2000") == ""
     src = tmp_path / "plano.dwg"
-    ezdxf.new("R2000").saveas(src)            # any DXF text will do as a stand-in
-    out = dwg_bridge.dwg_to_dxf(src)
-    assert out.is_file() and out.suffix == ".dxf"
-    assert (Path(str(out) + ".marker")).read_text().startswith("OCS")
-    dwg_bridge._discard_temp_dxf(out)
-
-
-def test_open_cad_studio_writes_r2018_and_stands_in_for_r2000(tmp_path, monkeypatch):
-    exe = _fake_ocs(tmp_path, monkeypatch)
-    dxf = tmp_path / "in.dxf"
-    _sample_doc().saveas(dxf)
-    # r2018 always goes to Open CAD Studio, even with LibreDWG present
-    monkeypatch.setattr(dwg_bridge, "find_dxf2dwg", lambda: tmp_path / "dxf2dwg-fake")
-    assert dwg_bridge.dwg_write_engine("r2018") == "opencadstudio"
-    assert dwg_bridge.dwg_write_engine("r2000") == "libredwg"
-    out = tmp_path / "out.dwg"
-    dwg_bridge.dxf_to_dwg(dxf, out, version="r2018")
-    assert out.is_file() and Path(str(out) + ".marker").exists()
-    # without LibreDWG's writer, r2000 falls to Open CAD Studio too
-    monkeypatch.setattr(dwg_bridge, "find_dxf2dwg", lambda: None)
-    assert dwg_bridge.dwg_write_engine("r2000") == "opencadstudio"
-    monkeypatch.delenv("INGECAD_OPENCADSTUDIO")
-    monkeypatch.setattr(dwg_bridge.shutil, "which", lambda n: None)
-    monkeypatch.setattr(dwg_bridge.Path, "home", staticmethod(lambda: tmp_path / "nohome"))
-    assert dwg_bridge.dwg_write_engine("r2018") == ""
+    src.write_bytes(b"AC1015")
     with pytest.raises(DwgBridgeError):
-        dwg_bridge.dxf_to_dwg(dxf, tmp_path / "none.dwg", version="r2018")
-
-
-needs_ocs = pytest.mark.skipif(dwg_bridge.find_opencadstudio() is None,
-                               reason="Open CAD Studio not installed")
-
-
-@needs_ocs
-def test_real_open_cad_studio_roundtrips_a_drawing(tmp_path):
-    """On a machine with Open CAD Studio: DXF → DWG 2018 (OCS) → DXF (LibreDWG
-    if present, else OCS) keeps the entities."""
+        dwg_bridge.dwg_to_dxf(src)
     dxf = tmp_path / "in.dxf"
     _sample_doc().saveas(dxf)
-    out = tmp_path / "out.dwg"
-    dwg_bridge.dxf_to_dwg(dxf, out, version="r2018")
-    assert out.stat().st_size > 0 and out.read_bytes()[:6] == b"AC1032"
-    back = dwg_bridge.dwg_to_dxf(out)
-    doc = ezdxf.readfile(back)
-    kinds = sorted(e.dxftype() for e in doc.modelspace())
-    assert kinds == ["CIRCLE", "LINE"]
-    dwg_bridge._discard_temp_dxf(back)
-
-
-def test_open_cad_studio_appimage_is_found_whatever_the_case(tmp_path):
-    # #21: saved by the browser as ".appimage", it was never found
-    from formats.dwg_bridge import _ocs_appimages
-
-    for name in ("OpenCADStudio-0.9.1.appimage", "OpenCADStudio-0.9.2.AppImage",
-                 "opencadstudio.AppImage", "notes.txt", "Other-1.0.AppImage"):
-        (tmp_path / name).write_text("")
-    found = [p.name for p in _ocs_appimages(tmp_path)]
-    assert found == ["OpenCADStudio-0.9.2.AppImage",
-                     "OpenCADStudio-0.9.1.appimage", "opencadstudio.AppImage"]
+    with pytest.raises(DwgBridgeError):
+        dwg_bridge.dxf_to_dwg(dxf, tmp_path / "out.dwg")
+    assert [n for n, _p in dwg_bridge.converters_status()] == [
+        "LibreDWG dwg2dxf", "LibreDWG dxf2dwg"]
