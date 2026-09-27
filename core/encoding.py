@@ -145,6 +145,103 @@ def _mtext_entities(doc):
                 yield entity
 
 
+# -- FIELD objects, R2007+ -> R2000 ---------------------------------------------
+# ezdxf does not know FIELD and keeps its tags verbatim, so a drawing read
+# from an R2007+ DWG carries the R2007+ layout of every FIELD into the R2000
+# intermediate. There each value is ``90 type, payload``; R2007+ adds ``93``
+# format flags before it and ``94``/``300``/``302`` after, and drops the
+# payload when flag 1 is set. LibreDWG, reading an R2000 DXF, took the
+# leading 93 for the child count and aborted the WHOLE save ("No class for
+# FIELD"): 34 of the first 266 corpus drawings. The R2000 form below is what
+# LibreDWG writes and reads for R2000 (the field's own value first, then the
+# children), with the value groups of ODA's R2000 output.
+
+#: Payload of a value by data type, for when R2007+ left it out.
+_FIELD_DEFAULT_PAYLOAD = {
+    0: ((91, 0),), 1: ((91, 0),), 2: ((140, 0.0),), 4: ((1, ""),),
+    8: ((92, 0),), 16: ((11, 0.0), (21, 0.0)),
+    32: ((11, 0.0), (21, 0.0), (31, 0.0)), 64: ((330, "0"),),
+}
+_FIELD_PAYLOAD_CODES = frozenset({91, 140, 1, 92, 310, 11, 21, 31, 330})
+_FIELD_R2007_ONLY = frozenset({94, 300, 302})
+
+
+def _r2000_field_value(tags, i):
+    """Read one value starting at ``tags[i]``; return (R2000 tags, next i)."""
+    from ezdxf.lldxf.types import DXFTag
+
+    if i < len(tags) and tags[i].code == 93:
+        i += 1                                   # format flags: R2007+ only
+    if i >= len(tags) or tags[i].code != 90:
+        return None, i
+    data_type = int(tags[i].value)
+    out = [tags[i]]
+    i += 1
+    payload = []
+    while i < len(tags) and tags[i].code in _FIELD_PAYLOAD_CODES:
+        payload.append(tags[i])
+        i += 1
+    if not payload:
+        payload = [DXFTag(code, value) for code, value in
+                   _FIELD_DEFAULT_PAYLOAD.get(data_type, ((91, 0),))]
+        if data_type not in _FIELD_DEFAULT_PAYLOAD:
+            out = [DXFTag(90, 0)]                # no R2000 spelling: unknown
+    out += payload
+    while i < len(tags) and tags[i].code in _FIELD_R2007_ONLY:
+        i += 1
+    return out, i
+
+
+def _r2000_field_tags(tags):
+    """The AcDbField subclass of an R2007+ FIELD, in its R2000 layout, or
+    None when it does not look like one (left alone, then)."""
+    from ezdxf.lldxf.types import DXFTag
+
+    codes = [t.code for t in tags]
+    try:
+        start = codes.index(300, codes.index(96)) + 1   # evaluation error msg
+    except ValueError:
+        return None
+    out = list(tags[:start])
+    own, i = _r2000_field_value(tags, start)
+    if own is None:
+        return None
+    out += own
+    if i >= len(tags) or tags[i].code != 93:
+        return None
+    count = int(tags[i].value)
+    out.append(tags[i])
+    i += 1
+    for _ in range(count):
+        if i >= len(tags) or tags[i].code != 6:
+            return None
+        out.append(tags[i])
+        child, i = _r2000_field_value(tags, i + 1)
+        if child is None:
+            return None
+        out += child
+    out += [t for t in tags[i:] if t.code in (301, 9, 98)] or \
+        [DXFTag(301, ""), DXFTag(98, 0)]
+    return out
+
+
+def _downgrade_fields(doc) -> list:
+    """Rewrite every FIELD to R2000 in place; return what undoes it."""
+    if doc.dxfversion < "AC1021":
+        return []
+    undo = []
+    for obj in doc.objects:
+        if obj.dxftype() != "FIELD" or not hasattr(obj, "xtags"):
+            continue
+        for sub in obj.xtags.subclasses:
+            if sub and sub[0].value == "AcDbField":
+                new = _r2000_field_tags(sub)
+                if new is not None:
+                    undo.append((sub, list(sub)))
+                    sub[:] = new
+    return undo
+
+
 def write_dwg_intermediate(doc, dxf_path: Path) -> None:
     """Write the DXF that ``dxf2dwg`` will convert.
 
@@ -186,6 +283,7 @@ def write_dwg_intermediate(doc, dxf_path: Path) -> None:
         # shadowed, which is why this wraps the constructor.
         self.force_optional = True
 
+    fields = _downgrade_fields(doc)
     try:
         doc.dxfversion = INTERMEDIATE_DXF_VERSION
         TagWriter.__init__ = forced_init
@@ -193,5 +291,7 @@ def write_dwg_intermediate(doc, dxf_path: Path) -> None:
     finally:
         TagWriter.__init__ = original_init
         doc.dxfversion = old_version
+        for sub, original in fields:
+            sub[:] = original
         for namespace, name in materialized:
             namespace.discard(name)

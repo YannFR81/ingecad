@@ -29,6 +29,48 @@ def apply() -> None:
     _patch_lwpolyline_get_points()
     _patch_radial_dimension_layout()
     _patch_linear_dimension_direction()
+    _patch_dxfreplace_mixed_surrogates()
+
+
+def _dxf_backslash_replace(exc):
+    """ezdxf's "dxfreplace" error handler, one character at a time.
+
+    ezdxf 1.4 hands the WHOLE unencodable run to ``surrogateescape`` as soon
+    as it meets a lone surrogate U+DC80..U+DCFF (a byte that was not UTF-8
+    when the file was read). ``surrogateescape`` then fails on any other
+    character in the same run, and the whole save dies with "'charmap'
+    codec can't encode characters". Real drawings carry exactly that mix:
+    XRECORD groups 300/302 holding binary blobs that LibreDWG emits as text
+    (181 such strings in one COFOPRI plan). One corpus sample of 95 had 13
+    Save-as-DWG failures from this alone.
+
+    Handling a single character per call lets each kind take its own path:
+    the surrogate goes back to the byte it came from — the blob is written
+    as it was read — and anything else is escaped as ezdxf does.
+    """
+    if not isinstance(exc, UnicodeEncodeError):
+        return _EZDXF_DXFREPLACE(exc)
+    x = ord(exc.object[exc.start])
+    if 0xDC80 <= x <= 0xDCFF:
+        return bytes([x - 0xDC00]), exc.start + 1
+    if x <= 0xFF:
+        return "\\x%02x" % x, exc.start + 1
+    if x <= 0xFFFF:
+        return "\\U+%04x" % x, exc.start + 1
+    return "\\U+%08x" % x, exc.start + 1
+
+
+def _patch_dxfreplace_mixed_surrogates() -> None:
+    import codecs
+
+    global _EZDXF_DXFREPLACE
+    from ezdxf.lldxf.encoding import dxf_backslash_replace
+
+    _EZDXF_DXFREPLACE = dxf_backslash_replace
+    codecs.register_error("dxfreplace", _dxf_backslash_replace)
+
+
+_EZDXF_DXFREPLACE = None
 
 
 def _patch_polygon_transform() -> None:
