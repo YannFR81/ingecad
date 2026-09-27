@@ -730,6 +730,21 @@ def _pan():
     return pm
 
 
+def _chevron(pointing_right: bool):
+    # The sidebar handle's chevron: it points the way the sidebar will go
+    # (right folds it away, left brings it back), as in IngeTrazo.
+    pm, p = _canvas()
+    pen = QPen(_STROKE, 3.0)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    tip, back = (15.5, 9.5) if pointing_right else (8.5, 14.5)
+    p.drawPolyline(QPolygonF([QPointF(back, 5.5), QPointF(tip, 12),
+                              QPointF(back, 18.5)]))
+    p.end()
+    return pm
+
+
 def _regen():
     pm, p = _canvas()
     p.drawArc(QRectF(5, 5, 14, 14), 30 * 16, 300 * 16)
@@ -1042,6 +1057,8 @@ _PAINTERS = {
     "ZOOM_EXTENTS": _zoom_extents, "ZOOM_WINDOW": _zoom_window,
     "ZOOM_PREVIOUS": _zoom_previous,
     "PAN": _pan, "REGEN": _regen,
+    "SIDEBAR_FOLD": lambda: _chevron(True),
+    "SIDEBAR_UNFOLD": lambda: _chevron(False),
     "LAYER": _layers, "LINETYPE": _linetype, "STYLE": _textstyle,
     "BLOCK": _block,
 }

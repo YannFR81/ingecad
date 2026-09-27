@@ -35,6 +35,9 @@ from views.title_bar import TitleBar
 from core.version import __version__
 from views.viewport import Viewport
 
+SETTING_SIDEBAR_SHOWN = "ui/sidebar_shown"
+SETTING_SIDEBAR_WIDTH = "ui/sidebar_width"
+
 
 class _OpenWorker(QObject):
     """Loads and regens a drawing off the UI thread.
@@ -894,6 +897,10 @@ class MainWindow(QMainWindow):
         PrintDialog(self).exec()
 
     def eventFilter(self, obj, event) -> bool:
+        # The sidebar handle rides the drawing's right edge.
+        if (event.type() in (QEvent.Resize, QEvent.Move, QEvent.Show)
+                and obj is getattr(self, "viewport", None)):
+            self._place_sidebar_handle()
         # In-place TEXT typing captures the keyboard before the command line.
         if (event.type() == QEvent.KeyPress and self.tools.text_capturing()
                 and not event.modifiers() & (Qt.ControlModifier | Qt.AltModifier)):
@@ -1084,6 +1091,22 @@ class MainWindow(QMainWindow):
         item(view_menu, tr("Regenerate"), self.regen_in_memory, icon="REGEN")
         clean = item(view_menu, tr("Clean Screen"), self.toggle_clean_screen)
         clean.setShortcut("Ctrl+0")
+        # The same toggle as the handle on the sidebar's edge (IngeTrazo's
+        # Window > Sidebar); Ctrl+F5 is free in AutoCAD. Made once: the
+        # menus are rebuilt per plugin, and a second copy would leave the
+        # handle toggling a stale action and Ctrl+F5 ambiguous (Qt fires
+        # neither).
+        sidebar = getattr(self, "_act_sidebar", None)
+        if sidebar is None:
+            sidebar = QAction(self)
+            sidebar.setCheckable(True)
+            sidebar.setChecked(True)
+            sidebar.setShortcut(QKeySequence("Ctrl+F5"))
+            sidebar.toggled.connect(lambda on: self._set_sidebar_visible(on))
+            self._act_sidebar = sidebar
+        sidebar.setText(tr("Sidebar"))
+        sidebar.setToolTip(tr("Show or hide the sidebar (Ctrl+F5)"))
+        view_menu.addAction(sidebar)
         view_menu.addSeparator()
         # Classic AutoCAD: View > Viewports (paper-space floating viewports).
         vp_menu = view_menu.addMenu(tr("Viewports"))
@@ -2650,68 +2673,115 @@ class MainWindow(QMainWindow):
         self._styles_panel = StylesPanel(self)
         self._styles_panel.changed.connect(self.viewport.update)
 
-        from PySide6.QtWidgets import QHBoxLayout, QToolButton
-
         tabs = QTabWidget(self)
         tabs.setObjectName("sidebar_tabs")
         tabs.setTabPosition(QTabWidget.South)   # tabs at the bottom (IngeTrazo)
         tabs.addTab(self._layers_panel, tr("Layers"))
         tabs.addTab(self._properties_panel, tr("Properties"))
         tabs.addTab(self._styles_panel, tr("Palette"))
-        collapse_btn = QToolButton(tabs)
-        collapse_btn.setText("›")
-        collapse_btn.setToolTip(tr("Collapse"))
-        collapse_btn.clicked.connect(self._collapse_sidebar)
-        tabs.setCornerWidget(collapse_btn, Qt.TopRightCorner)
         self._sidebar_tabs = tabs
-        self._sidebar_collapsed = False
-
-        # Thin expand strip shown when collapsed.
-        self._sidebar_strip = QToolButton(self)
-        self._sidebar_strip.setText("‹")
-        self._sidebar_strip.setToolTip(tr("Expand"))
-        self._sidebar_strip.clicked.connect(self._expand_sidebar)
-        self._sidebar_strip.setVisible(False)
-        self._sidebar_strip.setFixedWidth(20)
-
-        container = QWidget(self)
-        clay = QHBoxLayout(container)
-        clay.setContentsMargins(0, 0, 0, 0)
-        clay.setSpacing(0)
-        clay.addWidget(self._sidebar_strip)
-        clay.addWidget(tabs)
 
         dock = QDockWidget(self)
         dock.setObjectName("sidebar_dock")
         dock.setTitleBarWidget(QWidget(dock))   # no dock chrome
         dock.setFeatures(QDockWidget.NoDockWidgetFeatures)  # fixed, always there
-        dock.setWidget(container)
+        dock.setWidget(tabs)
         dock.setMinimumWidth(250)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
-        self.resizeDocks([dock], [280], Qt.Horizontal)
         self._layers_dock = dock
+        settings = QSettings()
+        self._sidebar_width = max(250, int(settings.value(
+            SETTING_SIDEBAR_WIDTH, 280)))
+        self.resizeDocks([dock], [self._sidebar_width], Qt.Horizontal)
+        self._build_sidebar_handle()
+        if str(settings.value(SETTING_SIDEBAR_SHOWN, "true")).lower() == "false":
+            self._act_sidebar.setChecked(False)
 
-    def _collapse_sidebar(self) -> None:
-        self._sidebar_collapsed = True
-        self._sidebar_tabs.setVisible(False)
-        self._sidebar_strip.setVisible(True)
-        self._layers_dock.setMinimumWidth(20)
-        self._layers_dock.setFixedWidth(20)
+    def _build_sidebar_handle(self) -> None:
+        """LibreOffice's sidebar handle, as in IngeTrazo: a slim button
+        sitting ON the line where the sidebar is resized, half-way down,
+        with a chevron. Click folds the sidebar away; the handle then rests
+        at the window's right edge, chevron pointing back in, and click
+        brings the sidebar back at the width it had. View > Sidebar
+        (Ctrl+F5) is the same toggle."""
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QToolButton
 
-    def _expand_sidebar(self) -> None:
-        self._sidebar_collapsed = False
-        self._sidebar_strip.setVisible(False)
-        self._sidebar_tabs.setVisible(True)
-        self._layers_dock.setFixedWidth(280)
-        self._layers_dock.setMinimumWidth(250)
-        self._layers_dock.setMaximumWidth(16777215)
+        from views.icons import _ACCENT, command_icon
+
+        btn = QToolButton(self)
+        btn.setObjectName("sidebar_handle")
+        btn.setFixedSize(14, 56)
+        btn.setIconSize(QSize(12, 12))
+        btn.setIcon(command_icon("SIDEBAR_FOLD"))
+        btn.setToolTip(self._act_sidebar.toolTip())
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setAutoRaise(True)
+        btn.setStyleSheet(
+            "QToolButton { background: palette(mid); border: none;"
+            " border-radius: 4px; }"
+            f"QToolButton:hover {{ background: {_ACCENT.name()}; }}")
+        act = self._act_sidebar
+        btn.clicked.connect(lambda: act.setChecked(not act.isChecked()))
+        self._sidebar_handle = btn
+        # Qt restacks the dock above its siblings when it is shown again:
+        # every change re-places, and so re-raises, the handle.
+        self._layers_dock.visibilityChanged.connect(
+            lambda _v: QTimer.singleShot(0, self._place_sidebar_handle))
+        self._place_sidebar_handle()
+
+    def _place_sidebar_handle(self) -> None:
+        """On the resize line between the drawing and the sidebar, centred
+        on the drawing's height; at the window's edge when folded -- inside
+        the frameless window's resize margin, which would take the click."""
+        btn = getattr(self, "_sidebar_handle", None)
+        if btn is None:
+            return
+        view = self.viewport
+        edge = view.mapTo(self, QPoint(view.width(), 0))
+        x = edge.x() - btn.width() // 2
+        margin = 0 if self.isMaximized() else self.RESIZE_MARGIN
+        x = max(0, min(x, self.width() - btn.width() - margin))
+        y = edge.y() + (view.height() - btn.height()) // 2
+        btn.move(x, max(0, y))
+        btn.raise_()
+        btn.setVisible(getattr(self, "_clean_screen_saved", None) is None)
+
+    def _sidebar_folded(self) -> bool:
+        return not self._act_sidebar.isChecked()
+
+    def _set_sidebar_visible(self, on: bool) -> None:
+        """Fold the sidebar away or bring it back at the width it had; the
+        chevron turns to point the way. Remembered for the next session."""
+        from views.icons import command_icon
+
+        dock = getattr(self, "_layers_dock", None)
+        if dock is None:
+            return
+        if on:
+            dock.show()      # Qt gives it back the width it had
+        else:
+            if dock.isVisible():
+                self._sidebar_width = max(250, dock.width())
+                QSettings().setValue(SETTING_SIDEBAR_WIDTH, self._sidebar_width)
+            dock.hide()
+        QSettings().setValue(SETTING_SIDEBAR_SHOWN, bool(on))
+        btn = self._sidebar_handle
+        btn.setIcon(command_icon("SIDEBAR_FOLD" if on else "SIDEBAR_UNFOLD"))
+        btn.setToolTip(self._act_sidebar.toolTip())
+        QTimer.singleShot(0, self._place_sidebar_handle)   # after the relayout
+
+    def _show_sidebar(self) -> None:
+        """A command that opens a sidebar tab (LA, PROPERTIES, STYLE)
+        unfolds the sidebar first."""
+        if self._sidebar_folded():
+            self._act_sidebar.setChecked(True)
 
     def toggle_layers_panel(self) -> None:
         # LA / Format>Layers focuses the Layers tab and refreshes it.
         if self._layers_panel is None:
             return
-        if self._sidebar_collapsed:
-            self._expand_sidebar()
+        self._show_sidebar()
         self._sidebar_tabs.setCurrentWidget(self._layers_panel)
         self._layers_panel.refresh()
 
@@ -2719,8 +2789,7 @@ class MainWindow(QMainWindow):
         # PROPERTIES / the shortcut menu focuses the Properties tab.
         if getattr(self, "_properties_panel", None) is None:
             return
-        if self._sidebar_collapsed:
-            self._expand_sidebar()
+        self._show_sidebar()
         self._sidebar_tabs.setCurrentWidget(self._properties_panel)
         self._properties_panel.refresh()
 
@@ -2728,8 +2797,7 @@ class MainWindow(QMainWindow):
         # STYLE / DIMSTYLE / Format menu focuses the Styles tab.
         if getattr(self, "_styles_panel", None) is None:
             return
-        if self._sidebar_collapsed:
-            self._expand_sidebar()
+        self._show_sidebar()
         self._sidebar_tabs.setCurrentWidget(self._styles_panel)
         self._styles_panel.refresh()
 
@@ -3649,11 +3717,13 @@ class MainWindow(QMainWindow):
             for w in bars:
                 w.hide()
             self.command_line.echo(tr("Clean screen ON (Ctrl+0 restores)."))
+            self._place_sidebar_handle()
         else:
             self._clean_screen_saved = None
             for w, visible in saved:
                 w.setVisible(visible)
             self.command_line.echo(tr("Clean screen off."))
+            self._place_sidebar_handle()
 
     def _clean_screen(self, on: bool) -> None:
         """CLEANSCREENON / CLEANSCREENOFF force a state; Ctrl+0 toggles."""

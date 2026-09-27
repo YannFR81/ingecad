@@ -179,7 +179,6 @@
   "Closed": "Cerrada",
   "Closed blank": "Cerrada vacía",
   "Closed filled": "Cerrada rellena",
-  "Collapse": "Colapsar",
   "Collinear points — no arc.": "Puntos colineales — no hay arco.",
   "Collinear points — no circle.": "Puntos colineales — no hay círculo.",
   "Color": "Color",
@@ -470,7 +469,6 @@
   "Erase source object after offsetting? [Yes/No] <{cur}>:": "¿Borrar el objeto de origen tras desfasar? [Sí(Y)/No(N)] <{cur}>:",
   "Erase source objects? [Yes/No] <N>:": "¿Borrar los objetos de origen? [Sí(Y)/No(N)] <N>:",
   "Exclude from new selection set": "Excluir del nuevo conjunto de selección",
-  "Expand": "Expandir",
   "Explode": "Descomponer",
   "Ext line 1": "Línea de ref. 1",
   "Ext line 2": "Línea de ref. 2",
@@ -1464,5 +1462,7 @@
   "DYN": "DIN",
   "Object snap tracking": "Rastreo de referencia a objetos",
   "Dynamic input": "Entrada dinámica",
-  "{count} annotative objects keep only their default scale in the DWG; save as DXF to keep every scale": "{count} objetos anotativos conservan en el DWG solo su escala por defecto; guarde como DXF para conservar todas las escalas"
+  "{count} annotative objects keep only their default scale in the DWG; save as DXF to keep every scale": "{count} objetos anotativos conservan en el DWG solo su escala por defecto; guarde como DXF para conservar todas las escalas",
+  "Sidebar": "Barra lateral",
+  "Show or hide the sidebar (Ctrl+F5)": "Mostrar u ocultar la barra lateral (Ctrl+F5)"
 }
