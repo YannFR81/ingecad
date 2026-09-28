@@ -3337,6 +3337,10 @@ class MainWindow(QMainWindow):
         wheel tick, and keying on that rebuilt 160 ms of model per tick,
         which is the whole cost this cache exists to avoid."""
         self._vp_model_cache = None
+        if getattr(self, "_active_vp", None) is not None:
+            # editing inside a viewport: rebuild the live model now, in the
+            # background, so the next pan finds it (or waits, never freezes)
+            self._vp_warm_live_scene()
 
     def _vp_model_scene(self):
         """The model, tessellated once for live viewport navigation --
@@ -3359,6 +3363,18 @@ class MainWindow(QMainWindow):
             return None
         self._vp_model_cache = (key, scene)
         return scene
+
+    def _vp_model_scene_ready(self):
+        """The live model scene if it is cached -- never built here: a pan
+        tick after an edit rebuilt it on the GUI thread, 2.4 s frozen on a
+        real sheet (Marco: "editar desde la lámina no está bien"). Missing,
+        the build starts in the background and this tick draws nothing;
+        the display catches up when it lands."""
+        cached = getattr(self, "_vp_model_cache", None)
+        if cached is not None and cached[0] == (self.document, self._active_layout):
+            return cached[1]
+        self._vp_warm_live_scene()
+        return None
 
     def _vp_warm_live_scene(self) -> None:
         """Start building the live model scene in the background, unless
@@ -3465,7 +3481,7 @@ class MainWindow(QMainWindow):
             placements.append(placement)
         if not placements:
             return False
-        scene = self._vp_model_scene()
+        scene = self._vp_model_scene_ready()
         if scene is None:
             return False
         for placement in placements:

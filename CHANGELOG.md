@@ -65,6 +65,11 @@
   the same as panning the paper. The model for the live view is now
   prepared as soon as the sheet tab is shown, so the double-click finds
   it ready.
+- **Editing inside a viewport no longer freezes the next pan.** After an
+  edit the model for the live view is stale, and the next pan tick rebuilt
+  it on the interface thread (2.4 s frozen on a real sheet). The rebuild
+  now starts in the background with the edit itself, and the display
+  catches up when it lands.
 - **A twisted viewport navigates live too.** One viewport with a view
   twist kept the whole sheet on the slow path -- every pan tick inside
   any viewport of Planos Constructivos' A-01 (one at 60°) re-baked the

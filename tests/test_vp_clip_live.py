@@ -433,3 +433,51 @@ def test_a_twisted_viewport_draws_the_same_live_as_baked(qapp):
     finally:
         win.document.dirty = False
         win.close()
+
+
+def test_an_edit_inside_a_viewport_never_freezes_the_next_pan(win, monkeypatch):
+    """After an edit the live model is stale; the next pan tick used to
+    rebuild it on the GUI thread (2.4 s frozen on a real sheet). The tick
+    now asks for the background build and draws nothing rather than
+    waiting; the display catches up when it lands."""
+    import threading
+
+    from PySide6.QtWidgets import QApplication
+
+    from render import backend
+
+    _psp, vp = _sheet(win, dangling=True)
+    win.switch_layout("Layout1")
+    win._activate_viewport(vp)
+    _warm(win)
+    assert win.vp_view_pan(1.0, 0.5) is True
+    assert win.viewport._live_vp is not None
+    win._vp_gesture_commit()
+
+    main = threading.main_thread()
+    on_gui = []
+    real_build = backend.build_scene
+
+    def spy(document, layout_name=None, **kw):
+        if kw.get("canvas") is not None and threading.current_thread() is main:
+            on_gui.append(1)
+        return real_build(document, layout_name, **kw)
+
+    monkeypatch.setattr(backend, "build_scene", spy)
+    # the edit's own warm-up is held back: a stale cache with nothing in
+    # flight is exactly what the tick must cope with
+    asked = []
+    real_warm = win._vp_warm_live_scene
+    monkeypatch.setattr(win, "_vp_warm_live_scene", lambda: asked.append(1))
+    win.invalidate_vp_model_cache()                            # what an edit does
+    assert asked == [1] and win._vp_model_cache is None
+    assert win.vp_view_pan(1.0, 0.5) is True                   # the next pan
+    assert on_gui == [], "the live model was rebuilt on the GUI thread"
+    assert asked == [1, 1]                                     # the tick asked for it
+    monkeypatch.setattr(win, "_vp_warm_live_scene", real_warm)
+    real_warm()
+    win._vp_live_worker.wait()
+    for _ in range(5):
+        QApplication.processEvents()
+    assert win.viewport._live_vp is not None                   # caught up
+    assert on_gui == []
