@@ -24,6 +24,7 @@ from render.backend import (_flatten_distance, build_scene_for_entities,
                             curve_quality)
 from tools.base import Tool, ToolContext
 from tools.blocks import BLOCK_TOOL_CLASSES
+from tools.cleanup_tools import CLEANUP_TOOL_CLASSES
 from tools.dimension import DIM_TOOL_CLASSES
 from tools.draw import TOOL_CLASSES
 from tools.edit import EDIT_TOOL_CLASSES
@@ -155,7 +156,7 @@ class _GhostWorker(QThread):
 ALL_TOOL_CLASSES = {**TOOL_CLASSES, **EDIT_TOOL_CLASSES, **BLOCK_TOOL_CLASSES,
                     **DIM_TOOL_CLASSES, **LAYOUT_TOOL_CLASSES, **LEADER_TOOL_CLASSES,
                     **CONSTRUCT_TOOL_CLASSES, **INQUIRY_TOOL_CLASSES,
-                    **MODIFY_TOOL_CLASSES,
+                    **MODIFY_TOOL_CLASSES, **CLEANUP_TOOL_CLASSES,
                     **LENGTHEN_TOOL_CLASSES, **ALIGN_TOOL_CLASSES,
                     **BOUNDARY_TOOL_CLASSES, **DONUT_TOOL_CLASSES,
                     **SCALETEXT_TOOL_CLASSES}
@@ -595,6 +596,29 @@ class ToolController(QObject):
         self.changed.emit()
 
     # -- services for editing tools (ToolContext.services) ---------------------
+    def request_selection(self) -> None:
+        """A tool asks for objects in the MIDDLE of its flow (WBLOCK: file,
+        block name, base point, THEN "Select objects:"). Same phase the
+        start of a ``wants_selection`` tool enters."""
+        if self.tool is None:
+            return
+        self._selecting_for = self.tool
+        self.window.command_line.echo(self.tool.selection_prompt())
+        self.changed.emit()
+
+    def ask_save_file(self, caption: str, suggested: str, name_filter: str):
+        """A save-file dialog for a tool (WBLOCK), through the one door
+        every file dialog uses (views/file_dialogs.py)."""
+        from views import file_dialogs
+
+        filename, _selected = file_dialogs.get_save_file(
+            self.window, caption, suggested, name_filter)
+        return filename or None
+
+    @property
+    def document(self):
+        return self.window.document
+
     def paper_context(self):
         """(document, active layout name) for paper-space tools (MVIEW)."""
         return self.window.document, self.window._active_layout

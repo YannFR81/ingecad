@@ -1090,11 +1090,15 @@ class MainWindow(QMainWindow):
              icon="SAVEAS")
         item(file_menu, tr("Save As..."), self._save_as_dialog,
              QKeySequence.SaveAs, icon="SAVEAS")
+        # AutoCAD: Application menu > Export > Block (WBLOCK, p. 2086).
+        cmd_item(file_menu, tr("Write Block..."), "WBLOCK", icon=False)
         file_menu.addSeparator()
-        # AutoCAD: File > Drawing Utilities > Drawing Recovery (p. 659).
+        # AutoCAD: File > Drawing Utilities > Drawing Recovery (p. 659),
+        # and Drawing Utilities > Purge (p. 1567).
         utilities = file_menu.addMenu(tr("Drawing Utilities"))
         item(utilities, tr("Drawing Recovery..."),
              lambda: self._cmd_drawing_recovery())
+        cmd_item(utilities, tr("Purge..."), "PURGE", icon=False)
         file_menu.addSeparator()
         item(file_menu, tr("Page Setup..."), lambda: self._cmd_pagesetup(),
              icon="PAGESETUP")
@@ -1330,6 +1334,8 @@ class MainWindow(QMainWindow):
         cmd_item(modify_menu, tr("Align"), "ALIGN", icon=False)
         modify_menu.addSeparator()
         cmd_item(modify_menu, tr("Match Properties"), "MATCHPROP")
+        cmd_item(modify_menu, tr("Delete Duplicate Objects"), "OVERKILL",
+                 icon=False)
         # ONE Object submenu -- there used to be two of them, both added to
         # Modify, so Image and Polyline lived in different menus of the
         # same name. AutoCAD's is Modify > Object > {Image, Polyline,
@@ -3142,6 +3148,12 @@ class MainWindow(QMainWindow):
         d.register("DDUNITS", lambda *a: self._units_dialog())
         d.register("-UNITS", self._cmd_units_cli)
         d.register("LTSCALE", self._cmd_ltscale)
+        # drawing cleanup (#37): PURGE has a dialog and a prompt flow; the
+        # other two need the mouse and are tools
+        d.register("PURGE", self._cmd_purge_dialog)
+        d.register("-PURGE", self._cmd_purge_cli)
+        for name in ("OVERKILL", "-OVERKILL", "WBLOCK", "-WBLOCK"):
+            d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         # In-scope commands that land in later phases: answer honestly.
         for name, phase in (
             ("LINETYPE", 6),
@@ -3838,6 +3850,50 @@ class MainWindow(QMainWindow):
         return layer_ops.layer_command(
             self.document, self.history,
             echo=self.command_line.echo, refresh=refresh, args=args)
+
+    # -- PURGE (#37) -----------------------------------------------------------
+    def _after_purge(self) -> None:
+        """Tables changed under the panels: every list that shows one."""
+        self.tools._invalidate_geometry()
+        if self._layers_panel is not None:
+            self._layers_panel.refresh()
+        if getattr(self, "_styles_panel", None) is not None:
+            self._styles_panel.refresh()
+        self._refresh_props_toolbar()
+        self.regen_in_memory()
+        self.viewport.update()
+
+    def _cmd_purge_cli(self, *args) -> Prompt | None:
+        """-PURGE: AutoCAD's prompt flow, one level of reference per run."""
+        if self.document is None:
+            self.new_document()
+        from core import cleanup
+
+        return cleanup.purge_command(
+            self.document, self.history, echo=self.command_line.echo,
+            refresh=self._after_purge, args=args)
+
+    def apply_purge(self, items: dict) -> int:
+        """Purge these items as ONE undoable step; how many went."""
+        from core import cleanup
+
+        command = cleanup.PurgeCommand(items)
+        if command.count == 0:
+            self.command_line.echo(tr("No unreferenced named objects found."))
+            return 0
+        self.history.execute(command)
+        self._after_purge()
+        self.command_line.echo(tr("{count} item(s) purged.", count=command.count))
+        return command.count
+
+    def _cmd_purge_dialog(self, *args) -> None:
+        if self.document is None:
+            self.new_document()
+        from views.purge_dialog import PurgeDialog
+
+        dialog = PurgeDialog(self, self.document)
+        if dialog.exec() and dialog.result_items is not None:
+            self.apply_purge(dialog.result_items)
 
     # -- UNITS / LTSCALE (drawing settings that live in the DXF header) --------
     def _header_value(self, name: str, default):
