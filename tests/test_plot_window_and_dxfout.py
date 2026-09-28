@@ -34,80 +34,91 @@ def _mouse(vp, kind, button, x, y):
         vp.mouseReleaseEvent(event)
 
 
-def test_window_leaves_the_dialog_picks_on_the_canvas_and_comes_back(qapp, monkeypatch):
+def _open_plot_and_pick(qapp, win, monkeypatch, second=None):
+    """Open PLOT, press Window <, and return the list of dialogs shown;
+    the second one (if any) is rejected at once."""
     from PySide6.QtCore import QTimer
 
     from views import print_dialog
 
+    opened = []
+    real_exec = print_dialog.PrintDialog.exec
+
+    def fake_exec(dialog):
+        opened.append(dialog)
+        if len(opened) == 1:
+            dialog.scale.setCurrentIndex(3)          # a setting to carry over
+            QTimer.singleShot(0, dialog._pick_window)
+        else:
+            QTimer.singleShot(0, dialog.reject)
+        return real_exec(dialog)
+
+    monkeypatch.setattr(print_dialog.PrintDialog, "exec", fake_exec)
+    win._plot_dialog()
+    return opened
+
+
+def _settle(qapp):
+    for _ in range(5):
+        qapp.processEvents()
+
+
+def test_window_asks_two_corners_like_autocad_and_the_dialog_comes_back(qapp, monkeypatch):
     win = _window(qapp)
     try:
-        opened = []
-        real_exec = print_dialog.PrintDialog.exec
-
-        def fake_exec(dialog):
-            opened.append(dialog)
-            if len(opened) == 1:
-                dialog.scale.setCurrentIndex(3)      # a setting to carry over
-                QTimer.singleShot(0, dialog._pick_window)
-            else:
-                QTimer.singleShot(0, dialog.reject)
-            return real_exec(dialog)
-
-        monkeypatch.setattr(print_dialog.PrintDialog, "exec", fake_exec)
-        win._plot_dialog()
-        assert len(opened) == 1 and win.viewport._zoom_window, "no pick started"
-        vp = win.viewport
-        _mouse(vp, QMouseEvent.Type.MouseButtonPress, Qt.LeftButton, 100, 100)
-        _mouse(vp, QMouseEvent.Type.MouseButtonRelease, Qt.LeftButton, 400, 300)
+        prompts = []
+        real = win.tools._on_prompt
+        win.tools._on_prompt = lambda text: (prompts.append(text), real(text))[1]
+        opened = _open_plot_and_pick(qapp, win, monkeypatch)
+        assert len(opened) == 1 and win.tools.tool is not None
+        assert win.tools.tool.name == "PLOTWINDOW"
+        assert prompts[-1] == "Specify first corner:"
+        win.tools.osnap_on = False
+        win.tools.on_click(10.0, 5.0)                 # click, release: no drag
+        assert prompts[-1] == "Specify opposite corner:"
+        # the rectangle follows the cursor between the two clicks
+        segments = win.tools.tool.preview_segments((60.0, 30.0))
+        assert len(segments) == 4
+        assert {p for seg in segments for p in seg} == {
+            (10.0, 5.0), (60.0, 5.0), (60.0, 30.0), (10.0, 30.0)}
+        win.tools.on_click(60.0, 30.0)
+        _settle(qapp)
+        assert win.tools.tool is None
         assert len(opened) == 2, "the dialog did not come back"
         again = opened[1]
         assert again.area.currentData() == "window"
         assert again.scale.currentIndex() == 3, "the settings were lost"
-        x0, y0, x1, y1 = again._area_rect()
-        wx0, wy1 = vp.view.screen_to_world(100, 100)
-        wx1, wy0 = vp.view.screen_to_world(400, 300)
-        assert (x0, y0, x1, y1) == pytest.approx((wx0, wy0, wx1, wy1))
+        assert again._area_rect() == pytest.approx((10.0, 5.0, 60.0, 30.0))
         assert again._pdf_btn.isEnabled()
     finally:
         win.document.dirty = False
         win.close()
 
 
-def test_right_click_cancels_the_pick_and_the_dialog_returns_without_a_window(qapp, monkeypatch):
-    from PySide6.QtCore import QTimer
-
-    from views import print_dialog
-
+def test_typed_corners_work_too(qapp, monkeypatch):
     win = _window(qapp)
     try:
-        opened = []
-        real_exec = print_dialog.PrintDialog.exec
-
-        def fake_exec(dialog):
-            opened.append(dialog)
-            QTimer.singleShot(0, dialog._pick_window if len(opened) == 1 else dialog.reject)
-            return real_exec(dialog)
-
-        monkeypatch.setattr(print_dialog.PrintDialog, "exec", fake_exec)
-        win._plot_dialog()
-        _mouse(win.viewport, QMouseEvent.Type.MouseButtonPress, Qt.RightButton, 50, 50)
+        opened = _open_plot_and_pick(qapp, win, monkeypatch)
+        win._on_command_submitted("70,40")
+        win._on_command_submitted("0,0")
+        _settle(qapp)
         assert len(opened) == 2
-        assert opened[1]._area_rect() is None
-        assert not opened[1]._pdf_btn.isEnabled(), "nothing to plot, yet PDF was enabled"
+        assert opened[1]._area_rect() == pytest.approx((0.0, 0.0, 70.0, 40.0))
     finally:
         win.document.dirty = False
         win.close()
 
 
-def test_a_plain_zoom_window_still_zooms(qapp):
+def test_esc_cancels_the_pick_and_the_dialog_returns_without_a_window(qapp, monkeypatch):
     win = _window(qapp)
     try:
-        vp = win.viewport
-        before = vp.view.scale
-        vp.start_zoom_window()
-        _mouse(vp, QMouseEvent.Type.MouseButtonPress, Qt.LeftButton, 100, 100)
-        _mouse(vp, QMouseEvent.Type.MouseButtonRelease, Qt.LeftButton, 200, 180)
-        assert vp.view.scale > before
+        opened = _open_plot_and_pick(qapp, win, monkeypatch)
+        win.tools.on_click(10.0, 5.0)
+        win.tools.cancel()
+        _settle(qapp)
+        assert len(opened) == 2
+        assert opened[1]._area_rect() is None
+        assert not opened[1]._pdf_btn.isEnabled(), "nothing to plot, yet PDF was enabled"
     finally:
         win.document.dirty = False
         win.close()

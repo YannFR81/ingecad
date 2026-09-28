@@ -1005,14 +1005,20 @@ class MainWindow(QMainWindow):
         if dialog.exec() != PICK_WINDOW:
             return
         state = dialog.state()
-        self.command_line.echo(tr("Specify window corners to plot (right-click cancels):"))
 
         def picked(rect) -> None:
             if rect is not None:
                 state["window"] = rect
             self._run_plot_dialog(state)
 
-        self.viewport.start_zoom_window(on_window=picked)
+        # AutoCAD plots what the sheet shows: a window is picked on the
+        # paper, never through an active viewport
+        self._deactivate_viewport()
+        self._plot_window_callback = picked
+        self.tools.start_tool("PLOTWINDOW")
+        if self.tools.tool is None:          # refused: the dialog comes back
+            self._plot_window_callback = None
+            picked(None)
 
     #: What a save holds back while it runs (see _save_off_the_ui_thread).
     _HELD_DURING_SAVE = frozenset((
