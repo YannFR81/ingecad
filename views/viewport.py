@@ -509,10 +509,26 @@ class Viewport(QOpenGLWidget):
         self.update()
         return True
 
-    def start_zoom_window(self) -> None:
-        """Next left-drag on the canvas picks the zoom window."""
+    def start_zoom_window(self, on_window=None) -> None:
+        """Next left-drag on the canvas picks the zoom window.
+
+        With ``on_window`` the rectangle is not zoomed to: it is handed over
+        as ``on_window((x0, y0, x1, y1))`` in canvas units, or
+        ``on_window(None)`` when the pick is cancelled (right-click, or a
+        drag too small to be a window) -- PLOT's Window area uses this.
+        """
         self._zoom_window = True
+        self._window_callback = on_window
         self._set_soft_cursor("cross")
+
+    def _hand_window(self, rect) -> bool:
+        """Give a picked rectangle to the caller that asked for it."""
+        callback = getattr(self, "_window_callback", None)
+        self._window_callback = None
+        if callback is None:
+            return False
+        callback(rect)
+        return True
 
     def scene_bounds(self) -> tuple[float, float, float, float]:
         """World bounds to fit on Zoom Extents.
@@ -2029,6 +2045,7 @@ class Viewport(QOpenGLWidget):
                 self._set_soft_cursor(None)
                 if self._rubber is not None:
                     self._rubber.hide()
+                self._hand_window(None)
             elif self.tool_delegate._grip_drag is not None:
                 self.tool_delegate.cancel()      # drop the hot grip
             elif (event.modifiers() & Qt.ShiftModifier
@@ -2097,9 +2114,15 @@ class Viewport(QOpenGLWidget):
                 self._rubber.hide()
             pos = event.position()
             x0, y0 = self._rubber_origin.x(), self._rubber_origin.y()
+            if not (abs(pos.x() - x0) > 4 and abs(pos.y() - y0) > 4):
+                self._hand_window(None)
             if abs(pos.x() - x0) > 4 and abs(pos.y() - y0) > 4:
                 wx0, wy0 = self.view.screen_to_world(x0, y0)
                 wx1, wy1 = self.view.screen_to_world(pos.x(), pos.y())
+                if self._hand_window((min(wx0, wx1), min(wy0, wy1),
+                                      max(wx0, wx1), max(wy0, wy1))):
+                    self.update()
+                    return
                 window = self._mspace_window()
                 if window is not None and window.vp_zoom_window(
                         min(wx0, wx1), min(wy0, wy1),

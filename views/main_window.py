@@ -947,6 +947,38 @@ class MainWindow(QMainWindow):
                 tr("Select objects to bring to front:") if mode == "front"
                 else tr("Select objects to send to back:"))
 
+    def _cmd_dxfout(self, *args) -> None:
+        """DXFOUT / File > Export > DXF (#51): write a DXF copy of the
+        drawing for another program (Blender, QGIS...). Unlike Save As it
+        does not change the file that is open: Ctrl+S keeps saving there."""
+        if self.document is None:
+            self.command_line.echo(tr("Nothing to export yet."))
+            return
+        if args:
+            path = args[0]
+        else:
+            path, _f = file_dialogs.get_save_file(
+                self, tr("Export to DXF"),
+                Path(self.document.name).stem + ".dxf",
+                tr("DXF (*.dxf)"), preferred=self.document.path)
+        if not path:
+            return
+        path = Path(path)
+        if path.suffix.lower() != ".dxf":
+            path = path.with_suffix(".dxf")
+        doc = self.document.doc
+        keep = doc.filename
+        try:
+            doc.saveas(path)
+        except Exception as exc:          # noqa: BLE001 - reported, not raised
+            self.command_line.echo(
+                tr("Cannot export {name}: {error}", name=path.name, error=str(exc)))
+            return
+        finally:
+            doc.filename = keep           # the open drawing keeps its own file
+        self.command_line.echo(tr("Exported {name} (DXF {version})",
+                                  name=path.name, version=doc.acad_release))
+
     def _publish_dialog(self) -> None:
         """PUBLISH (p. 1509): the layouts of the drawing into one PDF."""
         from views.publish_dialog import PublishDialog
@@ -962,9 +994,25 @@ class MainWindow(QMainWindow):
         if self.document is None:
             self.command_line.echo(tr("Nothing to plot."))
             return
-        from views.print_dialog import PrintDialog
+        self._run_plot_dialog()
 
-        PrintDialog(self).exec()
+    def _run_plot_dialog(self, state: dict | None = None) -> None:
+        """PLOT, and its Window pick: the dialog leaves, the corners are
+        picked on the canvas, and it comes back as it was (AutoCAD, #52)."""
+        from views.print_dialog import PICK_WINDOW, PrintDialog
+
+        dialog = PrintDialog(self, state)
+        if dialog.exec() != PICK_WINDOW:
+            return
+        state = dialog.state()
+        self.command_line.echo(tr("Specify window corners to plot (right-click cancels):"))
+
+        def picked(rect) -> None:
+            if rect is not None:
+                state["window"] = rect
+            self._run_plot_dialog(state)
+
+        self.viewport.start_zoom_window(on_window=picked)
 
     #: What a save holds back while it runs (see _save_off_the_ui_thread).
     _HELD_DURING_SAVE = frozenset((
@@ -1092,6 +1140,10 @@ class MainWindow(QMainWindow):
              QKeySequence.SaveAs, icon="SAVEAS")
         # AutoCAD: Application menu > Export > Block (WBLOCK, p. 2086).
         cmd_item(file_menu, tr("Write Block..."), "WBLOCK", icon=False)
+        # DXF for Blender, QGIS or any other program (#51): a copy, the
+        # drawing that is open stays what it was.
+        export_menu = file_menu.addMenu(tr("Export"))
+        item(export_menu, tr("DXF..."), lambda: self._cmd_dxfout())
         file_menu.addSeparator()
         # AutoCAD: File > Drawing Utilities > Drawing Recovery (p. 659),
         # and Drawing Utilities > Purge (p. 1567).
@@ -3572,6 +3624,7 @@ class MainWindow(QMainWindow):
         d.register("PLOT", lambda *a: self._plot_dialog())
         d.register("PRINT", lambda *a: self._plot_dialog())
         d.register("PUBLISH", lambda *a: self._publish_dialog())
+        d.register("DXFOUT", lambda *a: self._cmd_dxfout(*a))
         d.register("LAYOUT", self._cmd_layout)
         d.register("MSPACE", self._cmd_mspace)
         d.register("DRAWINGRECOVERY", self._cmd_drawing_recovery)

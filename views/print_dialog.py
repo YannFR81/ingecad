@@ -2,9 +2,16 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeCAD contributors.
 """PLOT dialog — paper, orientation, area, scale; PDF or system printer.
 
-Kept to what a civil plan needs: pick the paper, plot the extents or the
-current view, at Fit or a real 1:N metric scale (drawing unit metres or
-millimetres), then save a vector PDF or send to a printer.
+Kept to what a civil plan needs: pick the paper, plot the extents, the
+current view or a window picked on the drawing, at Fit or a real 1:N metric
+scale (drawing unit metres or millimetres), then save a vector PDF or send
+to a printer.
+
+Window (#52) works as AutoCAD's does: "Window <" closes the dialog, two
+corners are picked on the drawing, and the dialog comes back with every
+setting as it was and the window as the area. The dialog returns
+:data:`PICK_WINDOW` and its :meth:`PrintDialog.state`; the main window
+runs the pick and reopens it with that state.
 """
 from __future__ import annotations
 
@@ -20,10 +27,14 @@ from core.i18n import tr
 from views import file_dialogs
 from formats import pdf_out
 
+#: exec() result: the user asked to pick a window on the drawing.
+PICK_WINDOW = 2
+
 
 class PrintDialog(QDialog):
-    def __init__(self, window) -> None:
+    def __init__(self, window, state: dict | None = None) -> None:
         super().__init__(window)
+        self._window_rect = None
         self.window = window
         self.setWindowTitle(tr("Plot"))
         self.setMinimumWidth(320)
@@ -44,6 +55,10 @@ class PrintDialog(QDialog):
             self.area.addItem(tr("Layout (sheet at 1:1)"), "layout")
         self.area.addItem(tr("Extents"), "extents")
         self.area.addItem(tr("Current view"), "view")
+        self.area.addItem(tr("Window"), "window")
+        self.pick_btn = QPushButton(tr("Window <"), self)
+        self.pick_btn.setToolTip(tr("Pick two corners of the area to plot"))
+        self.pick_btn.clicked.connect(self._pick_window)
         self.area.currentIndexChanged.connect(self._on_area_changed)
         self.scale = QComboBox(self)
         self.scale.addItem(tr("Fit to paper"), None)
@@ -79,6 +94,7 @@ class PrintDialog(QDialog):
         form.addRow(tr("Paper size"), self.paper)
         form.addRow(tr("Orientation"), self.orientation)
         form.addRow(tr("Plot area"), self.area)
+        form.addRow("", self.pick_btn)
         form.addRow(tr("Scale"), self.scale)
         form.addRow(tr("Drawing unit"), self.units)
         form.addRow(tr("Plot style table"), self.style)
@@ -93,7 +109,37 @@ class PrintDialog(QDialog):
         pdf_btn.clicked.connect(self._to_pdf)
         printer_btn.clicked.connect(self._to_printer)
         form.addRow(buttons)
+        self._pdf_btn, self._printer_btn = pdf_btn, printer_btn
+        if state:
+            self._restore(state)
         self._on_area_changed()
+
+    # -- Window: leave, pick, come back -----------------------------------------
+    def state(self) -> dict:
+        """Everything the user set, to reopen the dialog as it was."""
+        return {"paper": self.paper.currentIndex(),
+                "orientation": self.orientation.currentIndex(),
+                "area": self.area.currentData(),
+                "scale": self.scale.currentIndex(),
+                "units": self.units.currentIndex(),
+                "style": self.style.currentIndex(),
+                "window": self._window_rect}
+
+    def _restore(self, state: dict) -> None:
+        for combo, key in ((self.paper, "paper"), (self.orientation, "orientation"),
+                           (self.scale, "scale"), (self.units, "units"),
+                           (self.style, "style")):
+            if state.get(key) is not None and 0 <= state[key] < combo.count():
+                combo.setCurrentIndex(state[key])
+        self._window_rect = state.get("window")
+        idx = self.area.findData(state.get("area"))
+        if idx >= 0:
+            self.area.setCurrentIndex(idx)
+
+    def _pick_window(self) -> None:
+        idx = self.area.findData("window")
+        self.area.setCurrentIndex(idx)
+        self.done(PICK_WINDOW)
 
     # -- plot parameters -------------------------------------------------------
     def _layout_mode(self) -> bool:
@@ -104,6 +150,12 @@ class PrintDialog(QDialog):
         manual = not self._layout_mode()
         for widget in (self.paper, self.orientation, self.scale, self.units):
             widget.setEnabled(manual)
+        # Window: nothing to plot until a window has been picked
+        window_area = self.area.currentData() == "window"
+        self.pick_btn.setVisible(window_area)
+        ready = not window_area or self._window_rect is not None
+        self._pdf_btn.setEnabled(ready)
+        self._printer_btn.setEnabled(ready)
 
     def _mm_per_unit(self):
         n = self.scale.currentData()
@@ -114,6 +166,8 @@ class PrintDialog(QDialog):
     def _area_rect(self):
         if self.area.currentData() == "view":
             return self.window.viewport._view_world_rect()
+        if self.area.currentData() == "window":
+            return self._window_rect
         return None                             # extents
 
     def _ctb(self) -> str:
