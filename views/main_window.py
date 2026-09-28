@@ -3178,7 +3178,7 @@ class MainWindow(QMainWindow):
         self._vp_gesture_commit()      # settle any wheel burst first
         self.history.execute(command)
         self.refresh_space_placement()
-        self.regen_in_memory()
+        self._vp_view_changed_by_command()
         return True
 
     def cycle_active_viewport(self) -> None:
@@ -3756,6 +3756,15 @@ class MainWindow(QMainWindow):
         return Prompt(tr("ZOOM [Extents/Window/Previous] <Extents>:"),
                       self._zoom_option)
 
+    def _vp_view_changed_by_command(self) -> None:
+        """A command moved the active viewport's view (ZOOM E, nXP, W):
+        show the new view NOW through the live matrix, as a pan tick does,
+        and let the sheet's regen land behind it. Waiting for the regen
+        alone showed the fit 5.7 s later on a real sheet (Marco)."""
+        self.refresh_space_placement()
+        self._vp_live_draw()
+        self.regen_in_memory()
+
     def _zoom_option(self, option: str) -> None:
         from core import layouts as layout_ops
 
@@ -3785,7 +3794,7 @@ class MainWindow(QMainWindow):
             self.history.execute(layout_ops.xp_zoom_command(active_vp, factor))
             self.command_line.echo(tr("Viewport scale set to {scale}.",
                                       scale=layout_ops.scale_label(factor)))
-            self.regen_in_memory()
+            self._vp_view_changed_by_command()
             return
         # Both ZOOM prompts offer the same options, so either source resolves
         # "Ventana" and "_W" to the W the branches below expect.
@@ -3797,7 +3806,7 @@ class MainWindow(QMainWindow):
                 # inside a viewport, Extents fits the MODEL in it
                 self.history.execute(
                     layout_ops.viewport_fit_command(self.document, active_vp))
-                self.regen_in_memory()
+                self._vp_view_changed_by_command()
                 return
             self.viewport.zoom_extents()
         elif opt in ("W", "WINDOW"):

@@ -302,3 +302,25 @@ def test_outside_the_active_viewport_the_pointer_is_an_arrow(win):
     win._deactivate_viewport()                            # PSPACE: paper again
     assert not v._arrow_pointer
     assert shapes == [] and v.cursor().shape() == Qt.BlankCursor
+
+
+def test_zoom_extents_inside_a_viewport_shows_the_new_view_at_once(win):
+    """Z + E inside a viewport fitted the view and waited for the sheet's
+    full regen to show it -- 5.7 s on Planos Constructivos (Marco). The
+    fitted view now shows through the live matrix at once, like a pan
+    tick, and the regen lands afterwards."""
+    _psp, vp = _sheet(win, dangling=True)
+    doc = win.document
+    doc.modelspace().add_circle((300, 200), 40)          # beyond the fitted view
+    win.switch_layout("Layout1")
+    win._activate_viewport(vp)
+    _warm(win)
+    height_before = float(vp.dxf.view_height)
+    win._on_command_submitted("Z")
+    win._on_command_submitted("E")
+    assert float(vp.dxf.view_height) != height_before    # the view was fitted
+    live = win.viewport._live_vp
+    assert live is not None, "the new view waited for the regen"
+    assert live[0]["factor"] == pytest.approx(
+        float(vp.dxf.height) / float(vp.dxf.view_height))
+    assert win.viewport.space_placement["factor"] == pytest.approx(live[0]["factor"])

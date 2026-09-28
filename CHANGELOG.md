@@ -65,6 +65,10 @@
   the same as panning the paper. The model for the live view is now
   prepared as soon as the sheet tab is shown, so the double-click finds
   it ready.
+- **ZOOM Extents, ZOOM nXP and ZOOM Window inside a viewport show the new
+  view at once** (0.3 s on a real sheet instead of 5.7 s): the fitted view
+  goes up through the live matrix, like a pan, while the sheet re-bakes
+  behind it.
 - **Inside a viewport, the pointer is an arrow over the rest of the
   sheet**, as in AutoCAD: the crosshair stays clipped to the active
   viewport, and the ordinary arrow shows where a double-click on the paper
