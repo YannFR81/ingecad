@@ -115,12 +115,16 @@ def current_text_style(document) -> str:
 
 
 def text_style_props(document, name: str) -> dict:
+    from core import annotative
+
     s = document.doc.styles.get(name)
     return {
         "font": s.dxf.get("font", ""),
         "height": s.dxf.get("height", 0.0),
         "width": s.dxf.get("width", 1.0),
         "oblique": s.dxf.get("oblique", 0.0),
+        # a paper height when on (the STYLE dialog's "Annotative" box)
+        "annotative": annotative.is_annotative(s),
     }
 
 
@@ -133,8 +137,20 @@ def current_dim_style(document) -> str:
 
 
 def dim_style_props(document, name: str) -> dict:
+    from core import annotative
+
     d = document.doc.dimstyles.get(name)
-    return {k: d.dxf.get(k, default) for k, default in DIM_VARS.items()}
+    props = {k: d.dxf.get(k, default) for k, default in DIM_VARS.items()}
+    props["annotative"] = annotative.is_annotative(d)
+    return props
+
+
+def _split_annotative(attribs: dict):
+    """(dxf attribs, annotative flag or None): the flag is XDATA, not a
+    DXF attribute, and every style command takes it in the same dict."""
+    attribs = dict(attribs)
+    flag = attribs.pop("annotative", None)
+    return attribs, (None if flag is None else bool(flag))
 
 
 def unique_name(existing, base: str) -> str:
@@ -156,7 +172,12 @@ class NewTextStyleCommand(Command):
         self.attribs = dict(attribs or {})
 
     def do(self, document) -> None:
-        document.doc.styles.new(self.style_name, dxfattribs=self.attribs)
+        from core import annotative
+
+        attribs, flag = _split_annotative(self.attribs)
+        style = document.doc.styles.new(self.style_name, dxfattribs=attribs)
+        if flag:
+            annotative.set_style_annotative(style, True)
         document.dirty = True
 
     def undo(self, document) -> None:
@@ -194,19 +215,32 @@ class SetTextStylePropsCommand(Command):
         self._old: dict = {}
 
     def do(self, document) -> None:
+        from core import annotative
+
         s = document.doc.styles.get(self.style_name)
-        self._old = {k: s.dxf.get(k, None) for k in self.props}
-        for k, v in self.props.items():
+        props, flag = _split_annotative(self.props)
+        if flag is not None and flag == annotative.is_annotative(s):
+            flag = None                  # unchanged: leave the XDATA alone
+        self._old_flag = None
+        self._old = {k: s.dxf.get(k, None) for k in props}
+        for k, v in props.items():
             s.dxf.set(k, v)
+        if flag is not None:
+            self._old_flag = annotative.is_annotative(s)
+            annotative.set_style_annotative(s, flag)
         document.dirty = True
 
     def undo(self, document) -> None:
+        from core import annotative
+
         s = document.doc.styles.get(self.style_name)
         for k, v in self._old.items():
             if v is None:
                 s.dxf.discard(k)
             else:
                 s.dxf.set(k, v)
+        if getattr(self, "_old_flag", None) is not None:
+            annotative.set_style_annotative(s, self._old_flag)
         document.dirty = True
 
 
@@ -237,7 +271,12 @@ class NewDimStyleCommand(Command):
         self.attribs = dict(attribs or {})
 
     def do(self, document) -> None:
-        document.doc.dimstyles.new(self.style_name, dxfattribs=self.attribs)
+        from core import annotative
+
+        attribs, flag = _split_annotative(self.attribs)
+        style = document.doc.dimstyles.new(self.style_name, dxfattribs=attribs)
+        if flag:
+            annotative.set_style_annotative(style, True)
         document.dirty = True
 
     def undo(self, document) -> None:
@@ -268,10 +307,13 @@ class DeleteDimStyleCommand(Command):
 
 def dim_style_attribs(document, name: str) -> dict:
     """Every explicit DXF attribute of a dimension style (for Start With)."""
+    from core import annotative
+
     d = document.doc.dimstyles.get(name)
     attribs = dict(d.dxf.all_existing_dxf_attribs())
     for skip in ("handle", "owner", "name"):
         attribs.pop(skip, None)
+    attribs["annotative"] = annotative.is_annotative(d)
     return attribs
 
 
@@ -302,20 +344,39 @@ class SetDimStylePropsCommand(Command):
         self._old: dict = {}
 
     def do(self, document) -> None:
+        from core import annotative
+
         d = document.doc.dimstyles.get(self.style_name)
-        self._old = {k: d.dxf.get(k, None) for k in self.props}
-        for k, v in self.props.items():
+        props, flag = _split_annotative(self.props)
+        if flag is not None and flag == annotative.is_annotative(d):
+            flag = None                  # unchanged: leave the XDATA alone
+        self._old_flag = None
+        if flag or (flag is None and annotative.is_annotative(d)):
+            props["dimscale"] = 0.0      # p. 2249: CANNOSCALE sizes it
+        self._old = {k: d.dxf.get(k, None) for k in props}
+        if flag is not None:
+            self._old.setdefault("dimscale", d.dxf.get("dimscale", None))
+        for k, v in props.items():
             d.dxf.set(k, v)
+        if flag is not None:
+            self._old_flag = annotative.is_annotative(d)
+            annotative.set_style_annotative(d, flag)
         rerender_dimensions(document, self.style_name)
         document.dirty = True
 
     def undo(self, document) -> None:
+        from core import annotative
+
         d = document.doc.dimstyles.get(self.style_name)
         for k, v in self._old.items():
             if v is None:
                 d.dxf.discard(k)
             else:
                 d.dxf.set(k, v)
+        if getattr(self, "_old_flag", None) is not None:
+            annotative.set_style_annotative(d, self._old_flag)
+            if not self._old_flag and self._old.get("dimscale") is not None:
+                d.dxf.dimscale = self._old["dimscale"]
         rerender_dimensions(document, self.style_name)
         document.dirty = True
 

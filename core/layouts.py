@@ -281,6 +281,14 @@ class AddViewportCommand(Command):
         current = document.doc.header.get("$CLAYER", "0")
         if current in document.doc.layers:
             self.entity.dxf.layer = current
+        # its own annotation scale, as AutoCAD writes it on every viewport
+        # (only in drawings that already speak annotative scales: a plain
+        # drawing is not given a scale list it never asked for)
+        from core import annotative
+
+        if annotative.scale_list(document.doc):
+            annotative.set_viewport_scale(
+                self.entity, annotative.scale_or_default(document.doc))
         document.dirty = True
 
     def undo(self, document) -> None:

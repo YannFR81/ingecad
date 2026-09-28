@@ -1833,6 +1833,7 @@ class MainWindow(QMainWindow):
             if fkey:
                 QShortcut(QKeySequence(fkey), self,
                           lambda k=key: self._toggle_mode(k))
+        self._build_annotation_controls(style)
         self._load_osnap_modes()
         self._load_display_settings()
         self._build_acad_shortcuts()
@@ -1974,6 +1975,234 @@ class MainWindow(QMainWindow):
             self._cmd_pspace()
         else:
             self._cmd_mspace()
+
+    # -- annotation scale (A2 of docs/plan-escala-anotativa.md) ------------------
+    #: ANNOAUTOSCALE: a registry setting in AutoCAD (initial -4); negative is
+    #: off, remembering which positive value turning it on restores.
+    SETTING_ANNOAUTOSCALE = "annotation/annoautoscale"
+
+    def annoautoscale(self) -> int:
+        from core.prefs import int_pref
+
+        value = int_pref(self.SETTING_ANNOAUTOSCALE, -4, -4, 4)
+        return value if value != 0 else -4
+
+    def _set_annoautoscale(self, value: int) -> None:
+        from PySide6.QtCore import QSettings
+
+        QSettings().setValue(self.SETTING_ANNOAUTOSCALE, int(value))
+        self._refresh_annotation_controls()
+
+    def _build_annotation_controls(self, style: str) -> None:
+        """AutoCAD's status-bar annotation scale ("Annotation Scale of the
+        current view"), with the two toggles beside it: ANNOALLVISIBLE (show
+        annotative objects of every scale) and ANNOAUTOSCALE (add the new
+        scale to the objects when it changes)."""
+        from PySide6.QtWidgets import QComboBox, QToolButton
+
+        self._anno_visible_btn = QToolButton(self)
+        self._anno_visible_btn.setText("\u25b2\u2217")
+        self._anno_visible_btn.setCheckable(True)
+        self._anno_visible_btn.setStyleSheet(style)
+        self._anno_visible_btn.setFocusPolicy(Qt.NoFocus)
+        self._anno_visible_btn.setToolTip(
+            tr("Annotation visibility: show annotative objects of every "
+               "scale (ANNOALLVISIBLE)"))
+        self._anno_visible_btn.clicked.connect(
+            lambda on: self._cmd_annoallvisible("1" if on else "0"))
+        self.statusBar().addPermanentWidget(self._anno_visible_btn)
+
+        self._anno_auto_btn = QToolButton(self)
+        self._anno_auto_btn.setText("\u25b2+")
+        self._anno_auto_btn.setCheckable(True)
+        self._anno_auto_btn.setStyleSheet(style)
+        self._anno_auto_btn.setFocusPolicy(Qt.NoFocus)
+        self._anno_auto_btn.setToolTip(
+            tr("Add scales to annotative objects when the annotation scale "
+               "changes (ANNOAUTOSCALE)"))
+        self._anno_auto_btn.clicked.connect(
+            lambda _=False: self._set_annoautoscale(-self.annoautoscale()))
+        self.statusBar().addPermanentWidget(self._anno_auto_btn)
+
+        self._anno_scale_combo = QComboBox(self)
+        self._anno_scale_combo.setToolTip(
+            tr("Annotation scale of the current view"))
+        self._anno_scale_combo.setMinimumWidth(80)
+        self._anno_scale_combo.setFocusPolicy(Qt.NoFocus)
+        self._anno_scale_combo.setStyleSheet(
+            "QComboBox { font-size: 11px; combobox-popup: 0; }")
+        self._anno_scale_combo.setMaxVisibleItems(16)
+        self._anno_scale_combo.activated.connect(self._on_anno_scale_combo)
+        self.statusBar().addPermanentWidget(self._anno_scale_combo)
+        self.tools.changed.connect(self._refresh_annotation_controls)
+        self._refresh_annotation_controls()
+
+    def _annotation_target(self):
+        """(viewport or None, editable): the space whose annotation scale
+        the control shows. Model tab: CANNOSCALE; inside a viewport: its
+        own; on the sheet itself annotations are paper, fixed at 1:1."""
+        vp = getattr(self, "_active_vp", None)
+        if vp is not None and vp.is_alive:
+            return vp, True
+        return None, getattr(self, "_active_layout", "Model") == "Model"
+
+    def _refresh_annotation_controls(self) -> None:
+        combo = getattr(self, "_anno_scale_combo", None)
+        if combo is None:
+            return
+        from core import annotative
+
+        auto = getattr(self, "_anno_auto_btn", None)
+        if auto is not None:
+            auto.setChecked(self.annoautoscale() > 0)
+        document = self.document
+        combo.blockSignals(True)
+        combo.clear()
+        if document is None:
+            combo.setEnabled(False)
+            combo.blockSignals(False)
+            return
+        doc = document.doc
+        vp, editable = self._annotation_target()
+        scales = annotative.scale_list(doc)
+        current = (annotative.viewport_scale(vp) if vp is not None
+                   else annotative.current_scale(doc))
+        current_name = current.name if current is not None else "1:1"
+        names = [s.name for s in scales]
+        if current_name not in names:
+            names.insert(0, current_name)
+        for name in names:
+            combo.addItem(name, name)
+        combo.setCurrentIndex(max(0, combo.findData(current_name)))
+        combo.setEnabled(editable)
+        combo.blockSignals(False)
+        visible = getattr(self, "_anno_visible_btn", None)
+        if visible is not None:
+            layout = (doc.modelspace() if self._active_layout == "Model"
+                      or vp is not None
+                      else doc.layouts.get(self._active_layout))
+            visible.setChecked(annotative.all_visible(layout))
+
+    def _on_anno_scale_combo(self, index: int) -> None:
+        name = self._anno_scale_combo.itemData(index)
+        if name:
+            self.set_annotation_scale(name)
+
+    def set_annotation_scale(self, name: str) -> bool:
+        """Make ``name`` the annotation scale of the current view: CANNOSCALE
+        on the Model tab, the active viewport's own inside one. One undo
+        step; ANNOAUTOSCALE > 0 also adds it to the objects that supported
+        the old one."""
+        from core import annotative
+
+        if self.document is None:
+            return False
+        doc = self.document.doc
+        if annotative.find_scale(doc, name) is None:
+            if name == "1:1":
+                annotative.default_scale(doc)
+            else:
+                self.command_line.echo(
+                    tr("Scale \"{name}\" is not in the drawing's scale list.",
+                       name=name))
+                self._refresh_annotation_controls()
+                return False
+        vp, editable = self._annotation_target()
+        if not editable:
+            self.command_line.echo(
+                tr("On the sheet annotations are paper: 1:1. Enter a viewport "
+                   "(MSPACE) to set its annotation scale."))
+            self._refresh_annotation_controls()
+            return False
+        self._vp_gesture_commit()
+        self.history.execute(annotative.SetAnnotationScaleCommand(
+            name, viewport=vp, autoscale=self.annoautoscale() > 0))
+        self.command_line.echo(tr("Annotation scale: {name}", name=name))
+        self.invalidate_vp_model_cache()
+        self.regen_in_memory()
+        self._refresh_annotation_controls()
+        return True
+
+    def _cmd_cannoscale(self, *args):
+        """CANNOSCALE (p. 2176): the name of the current annotation scale;
+        only a named scale that exists in the drawing's list is taken."""
+        from core import annotative
+        from core.actions import Prompt
+
+        if self.document is None:
+            return None
+        if args and str(args[0]).strip():
+            self.set_annotation_scale(str(args[0]).strip())
+            return None
+        vp, _editable = self._annotation_target()
+        current = (annotative.viewport_scale(vp) if vp is not None
+                   else annotative.current_scale(self.document.doc))
+        name = current.name if current is not None else "1:1"
+
+        def answer(text: str):
+            if text.strip():
+                self.set_annotation_scale(text.strip())
+            return None
+
+        return Prompt(tr("Enter new value for CANNOSCALE <{name}>:", name=name),
+                      answer)
+
+    def _cmd_annoautoscale(self, *args):
+        """ANNOAUTOSCALE (p. 2151): -4..4, negative = off keeping the mode."""
+        from core.actions import Prompt
+
+        def answer(text: str):
+            text = text.strip()
+            if not text:
+                return None
+            try:
+                value = int(text)
+            except ValueError:
+                value = None
+            if value is None or value == 0 or not -4 <= value <= 4:
+                self.command_line.echo(tr("Requires an integer between -4 and 4, "
+                                          "not 0."))
+                return None
+            self._set_annoautoscale(value)
+            return None
+
+        if args and str(args[0]).strip():
+            return answer(str(args[0]))
+        return Prompt(tr("Enter new value for ANNOAUTOSCALE <{v}>:",
+                         v=self.annoautoscale()), answer)
+
+    def _cmd_annoallvisible(self, *args):
+        """ANNOALLVISIBLE (p. 2150): saved per model space and per layout."""
+        from core import annotative
+        from core.actions import Prompt
+
+        if self.document is None:
+            return None
+        doc = self.document.doc
+        layout = (doc.modelspace() if self._active_layout == "Model"
+                  or getattr(self, "_active_vp", None) is not None
+                  else doc.layouts.get(self._active_layout))
+
+        def answer(text: str):
+            text = text.strip()
+            if not text:
+                return None
+            if text not in ("0", "1"):
+                self.command_line.echo(tr("Requires 0 or 1."))
+                self._refresh_annotation_controls()
+                return None
+            on = text == "1"
+            if on != annotative.all_visible(layout):
+                self.history.execute(annotative.SetAllVisibleCommand(layout, on))
+                self.invalidate_vp_model_cache()
+                self.regen_in_memory()
+            self._refresh_annotation_controls()
+            return None
+
+        if args and str(args[0]).strip():
+            return answer(str(args[0]))
+        return Prompt(tr("Enter new value for ANNOALLVISIBLE <{v}>:",
+                         v=1 if annotative.all_visible(layout) else 0), answer)
 
     def _update_space_button(self) -> None:
         btn = getattr(self, "_space_btn", None)
@@ -3128,9 +3357,13 @@ class MainWindow(QMainWindow):
                      "LAYULK", "IMAGEATTACH",
                      "TABLE", "PDFATTACH", "IMAGEADJUST", "TRANSPARENCY",
                      "LENGTHEN", "ALIGN", "BOUNDARY", "-BOUNDARY", "DONUT",
+                     "OBJECTSCALE", "-OBJECTSCALE",
                      "SCALETEXT"):
             d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         d.register("ADJUST", lambda *a: self.tools.start_tool("IMAGEADJUST"))
+        d.register("CANNOSCALE", self._cmd_cannoscale)
+        d.register("ANNOAUTOSCALE", self._cmd_annoautoscale)
+        d.register("ANNOALLVISIBLE", self._cmd_annoallvisible)
         d.register("CLEANSCREENON", lambda *a: self._clean_screen(True))
         d.register("CLEANSCREENOFF", lambda *a: self._clean_screen(False))
         d.register("LAYON", lambda *a: self._cmd_layon())

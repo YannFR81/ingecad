@@ -36,6 +36,7 @@ from tools.align import ALIGN_TOOL_CLASSES
 from tools.boundary import BOUNDARY_TOOL_CLASSES
 from tools.donut import DONUT_TOOL_CLASSES
 from tools.lengthen import LENGTHEN_TOOL_CLASSES
+from tools.annoscale import ANNO_TOOL_CLASSES
 from tools.scaletext import SCALETEXT_TOOL_CLASSES
 from tools.leaders import LEADER_TOOL_CLASSES
 from views.apertures import GRIP_PX, PICKBOX_DEFAULT, SNAP_PX
@@ -157,6 +158,7 @@ ALL_TOOL_CLASSES = {**TOOL_CLASSES, **EDIT_TOOL_CLASSES, **BLOCK_TOOL_CLASSES,
                     **CONSTRUCT_TOOL_CLASSES, **INQUIRY_TOOL_CLASSES,
                     **MODIFY_TOOL_CLASSES,
                     **LENGTHEN_TOOL_CLASSES, **ALIGN_TOOL_CLASSES,
+                    **ANNO_TOOL_CLASSES,
                     **BOUNDARY_TOOL_CLASSES, **DONUT_TOOL_CLASSES,
                     **SCALETEXT_TOOL_CLASSES}
 

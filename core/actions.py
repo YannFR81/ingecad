@@ -236,6 +236,12 @@ class AddEntityCommand(Command):
     def do(self, document) -> None:
         self.entity = self._factory(self.space(document))
         dress_new_entity(document, self.entity, self.layer)
+        # A text in an annotative style is born annotative at the current
+        # annotation scale: its typed height was a paper height (A2).
+        if self.entity.dxftype() in ("TEXT", "MTEXT"):
+            from core import annotative
+
+            annotative.annotate_new_entity(document, self.entity)
         document.dirty = True
 
     def undo(self, document) -> None:
@@ -243,6 +249,11 @@ class AddEntityCommand(Command):
             # Handles destroyed here are recorded so the UI can hide the
             # base-scene copies surgically instead of paying a full regen.
             self.removed_handles = [self.entity.dxf.handle]
+            from core import annotative
+
+            # its scale representations go with it (ezdxf's delete would
+            # leave them orphaned in OBJECTS)
+            annotative.remove_representations(self.entity)
             self.space(document).delete_entity(self.entity)
             self.entity = None
         document.dirty = True
@@ -1315,8 +1326,19 @@ class AddDimensionCommand(Command):
             self.dimlfac_resolver = None
         if self.dimlfac:
             override["dimlfac"] = float(self.dimlfac)
+        # An annotative style: DIMSCALE is 0 and CANNOSCALE sizes the
+        # dimension (p. 2249); it is born with that one representation.
+        from core import annotative
+
+        anno_scale = None
+        style_name = override.dimension.dxf.get("dimstyle", "Standard")
+        if annotative.style_is_annotative(document, "dimstyles", style_name):
+            anno_scale = annotative.creation_scale(document)
+            override["dimscale"] = anno_scale.factor
         override.render()
         self.dim = override.dimension
+        if anno_scale is not None:
+            annotative.annotate_new_dimension(document, self.dim, anno_scale)
         self._block_name = self.dim.dxf.get("geometry", None)
         current = document.doc.header.get("$CLAYER", "0")
         if current in document.doc.layers:
@@ -1334,6 +1356,9 @@ class AddDimensionCommand(Command):
             # current geometry attribute over the name captured at creation.
             block = self.dim.dxf.get("geometry", block)
             self.removed_handles = [self.dim.dxf.handle]
+            from core import annotative
+
+            annotative.remove_representations(self.dim)
             msp.delete_entity(self.dim)
         if block and block in document.doc.blocks:
             try:
