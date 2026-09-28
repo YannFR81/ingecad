@@ -855,6 +855,60 @@ class TolerantFrontend(Frontend):
         x0, y0, x1, y1 = rect
         return box[2] < x0 or box[0] > x1 or box[3] < y0 or box[1] > y1
 
+    #: The host Document, when the caller has one: xref paths resolve
+    #: against its folder and its UNLOADed names are honoured.
+    _host_document = None
+    #: id(referenced drawing) -> its own RenderContext (layers, styles)
+    _xref_contexts: Optional[dict] = None
+
+    def _draw_xref(self, insert, properties) -> None:
+        """An INSERT of an external reference draws the referenced
+        drawing's modelspace, placed by the insert (core.xrefs, #33). The
+        block is empty in this file, so ezdxf would draw nothing.
+
+        Each referenced entity resolves its properties in ITS drawing's
+        context (layers, linetypes, ByBlock through the insert), on the
+        canvas of the space being drawn (paper white or the model's dark),
+        and the host's ``xref|layer`` layer can still switch it off, as
+        AutoCAD lets a host freeze an xref's layer.
+        """
+        from core import xrefs
+
+        host = self._host_document
+        if host is None:
+            host = getattr(insert.doc, "_ingecad_document", None)
+        if host is None:
+            return
+        xdoc = xrefs.referenced_for_insert(host, insert)
+        if xdoc is None:
+            return                          # unloaded or not found: nothing
+        if self._xref_contexts is None:
+            self._xref_contexts = {}
+        ctx = self._xref_contexts.get(id(xdoc))
+        if ctx is None:
+            ctx = TolerantRenderContext(xdoc.doc)
+            self._xref_contexts[id(xdoc)] = ctx
+        # the referenced entities land on THIS canvas
+        ctx.current_layout_properties = self.ctx.current_layout_properties
+        host_layers = self.ctx.layers
+        prefix = insert.dxf.name + "|"
+        ctx.push_state(properties)
+        try:
+            for copy in xrefs.virtual_entities(insert, host):
+                try:
+                    host_layer = host_layers.get((prefix + copy.dxf.layer).lower())
+                    if host_layer is not None and not host_layer.is_visible:
+                        continue
+                    props = ctx.resolve_all(copy)
+                    if not props.is_visible:
+                        continue
+                    self.draw_entity(copy, props)
+                except Exception as exc:      # noqa: BLE001 - one bad entity
+                    self.skipped.append(
+                        f"{copy.dxftype()} in xref {insert.dxf.name}: {exc}")
+        finally:
+            ctx.pop_state()
+
     def draw_mleader_entity(self, entity, properties) -> None:
         """Draw a MULTILEADER from its real content, not its proxy graphic.
 
@@ -922,6 +976,14 @@ class TolerantFrontend(Frontend):
         reference, a tilted extrusion and a block holding an image go the
         usual way.
         """
+        if entity.dxftype() == "INSERT":
+            from core import xrefs
+
+            if xrefs.is_xref_insert(entity):
+                # an external reference: its content lives in another
+                # file, not in a recording of this one (see _draw_xref)
+                self._draw_xref(entity, properties)
+                return
         cache = self._block_cache
         key = self._instance_key(entity, properties) if cache is not None else None
         if key is None:
@@ -1113,6 +1175,7 @@ def build_scene_for_entities(document: Document, entities, flatten: float,
     context = TolerantRenderContext(document.doc)
     _apply_space_colors(context, document, canvas)
     frontend = TolerantFrontend(context, backend, frontend_config(flatten))
+    frontend._host_document = document       # xref paths resolve from here
     frontend.hidden_handles = frozenset(hidden_handles(document))
     frontend.draw_entities(entities)
     return pack(backend.buckets, _declared_extents(document))
@@ -1252,6 +1315,12 @@ def build_scene(document: Document, layout_name: str | None = None, *,
 
     groups = order_groups(layout)
     hidden = frozenset(hidden_handles(document))
+    # external references: read the referenced drawings NOW, in this
+    # process, so forked workers inherit them instead of each reading the
+    # files (core.xrefs, #33)
+    from core import xrefs as _xrefs
+
+    _xrefs.preload(document)
     # block references replay a recording of their block: the model only
     # (through a sheet's viewports too: the recording keys on the resolved
     # colours, which then are the paper's)
@@ -1263,6 +1332,7 @@ def build_scene(document: Document, layout_name: str | None = None, *,
         backend = VertexBackend(flatten, groups)
         context = TolerantRenderContext(document.doc)
         frontend = TolerantFrontend(context, backend, frontend_config(flatten))
+        frontend._host_document = document   # xref paths resolve from here
         frontend.hidden_handles = hidden
         if instancing:
             frontend._block_cache = {}

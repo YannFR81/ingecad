@@ -341,6 +341,25 @@ class SnapEngine:
             np.maximum(segs[:, 1], segs[:, 3]),
         ))
 
+    def _xref_children(self, e, oid, segs, seg_o, circles, circle_o,
+                       arcs, arc_o, points, point_o, curves, curve_o,
+                       targets, target_o) -> bool:
+        """The referenced drawing's geometry snaps through an xref INSERT
+        (#33): a colleague's wall end is an ENDpoint here too. Every hit
+        belongs to the INSERT, the only object the host can select."""
+        from core import xrefs
+
+        if not xrefs.is_xref_insert(e):
+            return False
+        host = getattr(e.doc, "_ingecad_document", None) or self.document
+        found = False
+        for child in xrefs.virtual_entities(e, host):
+            found = True
+            self._extract(child, oid, segs, seg_o, circles, circle_o,
+                          arcs, arc_o, points, point_o,
+                          curves, curve_o, targets, target_o)
+        return found
+
     def _build(self) -> None:
         self._owners = []
         self._owner_ids = {}
@@ -363,6 +382,12 @@ class SnapEngine:
                 oid = self._intern(e.dxf.handle)
             except Exception:
                 continue
+            if e.dxftype() == "INSERT":
+                # an external reference: its geometry snaps as one object
+                # (and the INSERT's own insertion point below, as ever)
+                self._xref_children(e, oid, segs, seg_o, circles, circle_o,
+                                    arcs, arc_o, points, point_o,
+                                    curves, curve_o, targets, target_o)
             self._extract(e, oid, segs, seg_o, circles, circle_o,
                           arcs, arc_o, points, point_o,
                           curves, curve_o, targets, target_o)

@@ -1215,6 +1215,12 @@ class MainWindow(QMainWindow):
         cmd_item(insert_menu, tr("Create Block..."), "BLOCK")
         cmd_item(insert_menu, tr("Define Attributes..."), "ATTDEF", icon=False)
         insert_menu.addSeparator()
+        # Classic AutoCAD: Insert > External Reference (XATTACH) and the
+        # External References palette (#33).
+        cmd_item(insert_menu, tr("External Reference..."), "XATTACH", icon=False)
+        cmd_item(insert_menu, tr("External References Palette"), "XREF",
+                 icon=False)
+        insert_menu.addSeparator()
         # Classic AutoCAD: Insert > Raster Image Reference.
         cmd_item(insert_menu, tr("Raster Image Reference..."), "IMAGEATTACH",
                  icon=False)
@@ -2859,6 +2865,9 @@ class MainWindow(QMainWindow):
         self.tools.changed.connect(self._properties_panel.refresh)
         self._styles_panel = StylesPanel(self)
         self._styles_panel.changed.connect(self.viewport.update)
+        from views.xrefs_panel import XrefsPanel
+
+        self._xrefs_panel = XrefsPanel(self)     # External References (#33)
 
         tabs = QTabWidget(self)
         tabs.setObjectName("sidebar_tabs")
@@ -2866,6 +2875,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._layers_panel, tr("Layers"))
         tabs.addTab(self._properties_panel, tr("Properties"))
         tabs.addTab(self._styles_panel, tr("Palette"))
+        tabs.addTab(self._xrefs_panel, tr("Xrefs"))
         self._sidebar_tabs = tabs
 
         dock = QDockWidget(self)
@@ -2987,6 +2997,125 @@ class MainWindow(QMainWindow):
         self._show_sidebar()
         self._sidebar_tabs.setCurrentWidget(self._styles_panel)
         self._styles_panel.refresh()
+
+    # -- external references (#33) -------------------------------------------------
+    def toggle_xrefs_panel(self) -> None:
+        """XREF / EXTERNALREFERENCES / Insert menu: the palette tab."""
+        if getattr(self, "_xrefs_panel", None) is None:
+            return
+        self._show_sidebar()
+        self._sidebar_tabs.setCurrentWidget(self._xrefs_panel)
+        self._xrefs_panel.refresh()
+
+    def xrefs_changed(self) -> None:
+        """An xref was attached, detached, re-pathed, unloaded or reloaded:
+        the picture, the pick/snap caches and the palette all follow."""
+        if self.document is None:
+            return
+        self.tools._invalidate_geometry()
+        self.invalidate_vp_model_cache()
+        self.regen_in_memory()
+        panel = getattr(self, "_xrefs_panel", None)
+        if panel is not None:
+            panel.refresh()
+
+    def _cmd_xref_cli(self, *args) -> Prompt | None:
+        """-XREF: the command-line twin of the palette."""
+        if self.document is None:
+            return None
+        if args:
+            return self._xref_option(" ".join(str(a) for a in args))
+        return Prompt(tr("Enter an option [?/Bind/Detach/Path/Unload/Reload/"
+                         "Overlay/Attach] <Attach>:"), self._xref_option)
+
+    def _xref_option(self, text: str) -> Prompt | None:
+        from core import xrefs
+
+        option = text.strip().upper()
+        if option in ("", "A", "ATTACH", "O", "OVERLAY"):
+            self.tools._xref_overlay_next = option in ("O", "OVERLAY")
+            self.tools.start_tool("XATTACH")
+            return None
+        if option == "?":
+            refs = xrefs.references(self.document)
+            if not refs:
+                self.command_line.echo(tr("No external references."))
+            for ref in refs:
+                self.command_line.echo(
+                    f"{ref.name}  {tr(ref.status)}  "
+                    f"{tr('Overlay') if ref.overlay else tr('Attach')}  {ref.path}")
+            return self._cmd_xref_cli()
+        if option in ("B", "BIND"):
+            self.command_line.echo(
+                tr("Bind is not available yet: the referenced drawing stays "
+                   "external. Detach, or insert the file as a block."))
+            return self._cmd_xref_cli()
+        if option in ("D", "DETACH"):
+            return Prompt(tr("Enter xref name(s) to detach:"), self._xref_detach)
+        if option in ("P", "PATH"):
+            return Prompt(tr("Edit xref path for which xref(s):"), self._xref_path_pick)
+        if option in ("U", "UNLOAD"):
+            return Prompt(tr("Enter xref name(s) to unload:"), self._xref_unload)
+        if option in ("R", "RELOAD"):
+            return Prompt(tr("Enter xref name(s) to reload:"), self._xref_reload)
+        self.command_line.echo(tr("Invalid option keyword."))
+        return self._cmd_xref_cli()
+
+    def _xref_names(self, text: str) -> list[str]:
+        from core import xrefs
+
+        names = xrefs.match_names(self.document, text)
+        if not names:
+            self.command_line.echo(tr("No matching xref names."))
+        return names
+
+    def _xref_detach(self, text: str) -> None:
+        from core import xrefs
+
+        for name in self._xref_names(text):
+            self.tools._execute(xrefs.DetachXrefCommand(name))
+            self.command_line.echo(tr("Xref {name} detached.", name=name))
+        self.xrefs_changed()
+
+    def _xref_unload(self, text: str) -> None:
+        from core import xrefs
+
+        names = self._xref_names(text)
+        xrefs.unload(self.document, names)
+        for name in names:
+            self.command_line.echo(tr("Xref {name} unloaded.", name=name))
+        self.xrefs_changed()
+
+    def _xref_reload(self, text: str) -> None:
+        from core import xrefs
+
+        names = self._xref_names(text)
+        xrefs.reload(self.document, names)
+        for name in names:
+            self.command_line.echo(tr("Xref {name} reloaded.", name=name))
+        self.xrefs_changed()
+
+    def _xref_path_pick(self, text: str) -> Prompt | None:
+        from core import xrefs
+
+        names = self._xref_names(text)
+        if not names:
+            return None
+        name = names[0]
+        block = self.document.doc.blocks.get(name)
+        self.command_line.echo(
+            tr("Old path: {path}", path=xrefs.xref_path_of(block)))
+        return Prompt(tr("New path:"),
+                      lambda new, n=name: self._xref_set_path(n, new))
+
+    def _xref_set_path(self, name: str, new_path: str) -> None:
+        from core import xrefs
+
+        new_path = new_path.strip()
+        if not new_path:
+            return
+        self.tools._execute(xrefs.SetXrefPathCommand(name, new_path))
+        self.xrefs_changed()
 
     def regen_in_memory(self, zoom_after: bool = False) -> None:
         """Rebuild the scene in a background thread; adopt when done.
@@ -3150,7 +3279,7 @@ class MainWindow(QMainWindow):
                      "LAYULK", "IMAGEATTACH",
                      "TABLE", "PDFATTACH", "IMAGEADJUST", "TRANSPARENCY",
                      "LENGTHEN", "ALIGN", "BOUNDARY", "-BOUNDARY", "DONUT",
-                     "SCALETEXT"):
+                     "SCALETEXT", "XATTACH"):
             d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         d.register("ADJUST", lambda *a: self.tools.start_tool("IMAGEADJUST"))
         # Block attributes (#35): ATTDEF, -ATTDEF, EATTEDIT, -ATTEDIT, ATTSYNC,
@@ -3160,6 +3289,10 @@ class MainWindow(QMainWindow):
         for name in ATTRIBUTE_TOOL_CLASSES:
             d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         d.register("BATTMAN", lambda *a: self._cmd_battman())
+        # external references (#33): the palette, its command-line twin
+        d.register("XREF", lambda *a: self.toggle_xrefs_panel())
+        d.register("EXTERNALREFERENCES", lambda *a: self.toggle_xrefs_panel())
+        d.register("-XREF", self._cmd_xref_cli)
         d.register("CLEANSCREENON", lambda *a: self._clean_screen(True))
         d.register("CLEANSCREENOFF", lambda *a: self._clean_screen(False))
         d.register("LAYON", lambda *a: self._cmd_layon())
@@ -5186,6 +5319,8 @@ class MainWindow(QMainWindow):
             self._layers_panel.refresh()   # show the opened drawing's layers
         if getattr(self, "_styles_panel", None) is not None:
             self._styles_panel.refresh()   # and its text/dimension styles
+        if getattr(self, "_xrefs_panel", None) is not None:
+            self._xrefs_panel.refresh()    # and its external references
         if getattr(self, "_props_toolbar", None) is not None:
             self._refresh_props_toolbar()
         self.setWindowTitle(f"IngeCAD — {document.name}")

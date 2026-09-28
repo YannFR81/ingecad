@@ -53,6 +53,11 @@ class Document:
 
     def __init__(self, doc: Drawing, path: Optional[Path] = None) -> None:
         self.doc = doc
+        # The way back from an ezdxf entity to the Document it lives in
+        # (``entity.doc._ingecad_document``): the pick index, the snap
+        # engine and the renderer meet bare entities and need the host's
+        # path to resolve an external reference (core.xrefs).
+        doc._ingecad_document = self
         self.path = path
         self._dirty = False
         # Monotonic edit counter: every mutation bumps it (all Commands set

@@ -41,6 +41,7 @@ from tools.lengthen import LENGTHEN_TOOL_CLASSES
 from tools.scaletext import SCALETEXT_TOOL_CLASSES
 from tools.leaders import LEADER_TOOL_CLASSES
 from tools.dim_commands import DIMCMD_TOOL_CLASSES   # #39
+from tools.xrefs import XREF_TOOL_CLASSES
 from views.apertures import GRIP_PX, PICKBOX_DEFAULT, SNAP_PX
 
 # Overlay entities beyond this schedule an idle merge into the base scene
@@ -162,7 +163,8 @@ ALL_TOOL_CLASSES = {**TOOL_CLASSES, **EDIT_TOOL_CLASSES, **BLOCK_TOOL_CLASSES,
                     **ATTRIBUTE_TOOL_CLASSES,
                     **LENGTHEN_TOOL_CLASSES, **ALIGN_TOOL_CLASSES,
                     **BOUNDARY_TOOL_CLASSES, **DONUT_TOOL_CLASSES,
-                    **SCALETEXT_TOOL_CLASSES, **DIMCMD_TOOL_CLASSES}
+                    **SCALETEXT_TOOL_CLASSES, **DIMCMD_TOOL_CLASSES,
+                    **XREF_TOOL_CLASSES}
 
 
 #: name -> (owner, windows using it). The registry is process-wide and a

@@ -275,10 +275,33 @@ class GeometryIndex:
                 for a, b in zip(corners, corners[1:] + corners[:1]):
                     segs.append((a[0], a[1], b[0], b[1]))
                     seg_o.append(oid)
+            elif t == "INSERT" and GeometryIndex._xref(e, oid, segs, seg_o,
+                                                       circles, circle_o,
+                                                       pboxes, pbox_o):
+                pass    # an external reference: traced, picks as one object
             else:
                 GeometryIndex._box(e, oid, boxes, box_o)
         except Exception:
             pass
+
+    @staticmethod
+    def _xref(e, oid, segs, seg_o, circles, circle_o,
+              pboxes=None, pbox_o=None) -> bool:
+        """Trace an xref INSERT through the referenced drawing (#33): its
+        block is empty here, so a box would be empty too. Clicking a
+        colleague's wall selects the whole reference, as in AutoCAD."""
+        from core import xrefs
+
+        if not xrefs.is_xref_insert(e):
+            return False
+        host = getattr(e.doc, "_ingecad_document", None)
+        if host is None:
+            return False
+        children = list(xrefs.virtual_entities(e, host))
+        if not children:
+            return False
+        return GeometryIndex._children(children, oid, segs, seg_o,
+                                       circles, circle_o, pboxes, pbox_o)
 
     @staticmethod
     def _text_extents(e):
