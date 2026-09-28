@@ -37,6 +37,7 @@ from tools.boundary import BOUNDARY_TOOL_CLASSES
 from tools.donut import DONUT_TOOL_CLASSES
 from tools.lengthen import LENGTHEN_TOOL_CLASSES
 from tools.scaletext import SCALETEXT_TOOL_CLASSES
+from tools.leaders import LEADER_TOOL_CLASSES
 from views.apertures import GRIP_PX, PICKBOX_DEFAULT, SNAP_PX
 
 # Overlay entities beyond this schedule an idle merge into the base scene
@@ -152,7 +153,7 @@ class _GhostWorker(QThread):
         self.done.emit(self._ents, scene)
 
 ALL_TOOL_CLASSES = {**TOOL_CLASSES, **EDIT_TOOL_CLASSES, **BLOCK_TOOL_CLASSES,
-                    **DIM_TOOL_CLASSES, **LAYOUT_TOOL_CLASSES,
+                    **DIM_TOOL_CLASSES, **LAYOUT_TOOL_CLASSES, **LEADER_TOOL_CLASSES,
                     **CONSTRUCT_TOOL_CLASSES, **INQUIRY_TOOL_CLASSES,
                     **MODIFY_TOOL_CLASSES,
                     **LENGTHEN_TOOL_CLASSES, **ALIGN_TOOL_CLASSES,
@@ -517,9 +518,9 @@ class ToolController(QObject):
     def mark_scene_merged(self) -> None:
         """A full regen just happened: overlay entities now live in the base."""
         self._base_handles = {
-            c.entity.dxf.handle
+            e.dxf.handle
             for c in self._draw_commands()
-            if c.entity is not None
+            for e in self._command_entities(c)
         }
         self._pending_render = []
         # stamped placements are part of the fresh base scene now
@@ -836,8 +837,13 @@ class ToolController(QObject):
             else None
 
     # -- the in-place MTEXT editor ---------------------------------------------
-    def open_mtext_editor(self, first, second, char_height: float) -> None:
-        """MTEXT's two corners placed: edit the new text on the canvas."""
+    def open_mtext_editor(self, first, second, char_height: float,
+                          commit=None) -> None:
+        """MTEXT's two corners placed: edit the new text on the canvas.
+
+        ``commit(content, extras)`` replaces the default (an MTEXT in the
+        box) for the tools whose text belongs to another entity -- a leader
+        builds its own command from what was typed."""
         from views.mtext_editor import MTextInPlaceEditor
 
         top_left = (min(first[0], second[0]), max(first[1], second[1]))
@@ -847,7 +853,7 @@ class ToolController(QObject):
         if document is not None:
             style = document.doc.header.get("$TEXTSTYLE", "Standard")
 
-        def commit(content: str, extras: dict) -> None:
+        def default_commit(content: str, extras: dict) -> None:
             if content.strip():
                 box_second = second
                 new_width = extras.get("width")
@@ -867,7 +873,8 @@ class ToolController(QObject):
 
         self._mtext_editor = MTextInPlaceEditor(
             self.window.viewport, top_left=top_left, width_world=width,
-            char_height=char_height, text="", on_commit=commit,
+            char_height=char_height, text="",
+            on_commit=commit if commit is not None else default_commit,
             document=document, style=style, allow_justify=True)
 
     def edit_hatch(self, entity) -> bool:
@@ -1130,7 +1137,8 @@ class ToolController(QObject):
         incrementally and the base scene needs no urgent regen.
         """
         if isinstance(command, actions.AddEntityCommand):
-            return [command.entity] if command.entity is not None else []
+            # a LEADER brings the MTEXT it annotates (extra_entities)
+            return ToolController._command_entities(command)
         if isinstance(command, actions.AddDimensionCommand):
             # Its graphics live in an anonymous *D block, which the overlay
             # renders through the same frontend the base scene uses -- 1035
@@ -1674,6 +1682,14 @@ class ToolController(QObject):
         return [c for c in self.window.history._undo
                 if isinstance(c, actions.AddEntityCommand)]
 
+    @staticmethod
+    def _command_entities(command) -> list:
+        """What an additive command put in the drawing: its entity and,
+        for a LEADER, the MTEXT it annotates (``extra_entities``)."""
+        entities = [command.entity] if command.entity is not None else []
+        entities += list(getattr(command, "extra_entities", None) or [])
+        return entities
+
     def _refresh_overlay(self) -> None:
         document = self.window.document
         if document is None:
@@ -1681,9 +1697,9 @@ class ToolController(QObject):
         # owner=None means the entity is unlinked from modelspace (erased,
         # kept alive only for undo) — never draw those in the overlay.
         entities = [
-            c.entity for c in self._draw_commands()
-            if c.entity is not None and c.entity.dxf.owner is not None
-            and c.entity.dxf.handle not in self._base_handles
+            e for c in self._draw_commands() for e in self._command_entities(c)
+            if e.is_alive and e.dxf.owner is not None
+            and e.dxf.handle not in self._base_handles
         ]
         entities += [e for e in self._pending_render
                      if e.is_alive and e.dxf.owner is not None

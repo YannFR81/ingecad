@@ -1291,6 +1291,10 @@ class MainWindow(QMainWindow):
         cmd_item(dim_menu, tr("Baseline"), "DIMBASELINE")
         cmd_item(dim_menu, tr("Continue"), "DIMCONTINUE")
         dim_menu.addSeparator()
+        cmd_item(dim_menu, tr("Multileader"), "MLEADER")
+        cmd_item(dim_menu, tr("Quick Leader"), "QLEADER")
+        cmd_item(dim_menu, tr("Leader"), "LEADER")
+        dim_menu.addSeparator()
         cmd_item(dim_menu, tr("Center Mark"), "DIMCENTER")
         cmd_item(dim_menu, tr("Center Mark with Centerlines"), "CENTERMARK")
         cmd_item(dim_menu, tr("Centerline"), "CENTERLINE")
@@ -2477,7 +2481,8 @@ class MainWindow(QMainWindow):
                             ("DIMDIAMETER", tr("Diameter")),
                             ("DIMANGULAR", tr("Angular")),
                             ("DIMBASELINE", tr("Baseline")),
-                            ("DIMCONTINUE", tr("Continue"))):
+                            ("DIMCONTINUE", tr("Continue")),
+                            ("MLEADER", tr("Multileader"))):
             act = QAction(command_icon(name), label, self)
             act.setToolTip(f"{label} ({name})")
             act.triggered.connect(lambda _=False, n=name: self._invoke_command(n))
@@ -3101,6 +3106,7 @@ class MainWindow(QMainWindow):
         d.register("PSPACE", self._cmd_pspace)
         d.register("VPLOCK", self._cmd_vplock)
         d.register("PAGESETUP", self._cmd_pagesetup)
+        d.register("MLEADERSTYLE", self._cmd_mleaderstyle)
         # Phase 4 drawing + Phase 5 editing tools.
         for name in ("LINE", "CIRCLE", "ARC", "COPYBASE", "PASTEBLOCK", "PLINE", "RECTANG", "POLYGON",
                      "SPLINE",
@@ -3112,6 +3118,7 @@ class MainWindow(QMainWindow):
                      "DIMANGULAR", "DIMARC", "DIMORDINATE", "DIMCENTER",
                      "CENTERMARK", "CENTERLINE",
                      "DIMCONTINUE", "DIMBASELINE", "DIMTEDIT",
+                     "MLEADER", "QLEADER", "LEADER",
                      "MVIEW", "XLINE", "RAY", "DIVIDE", "MEASURE",
                      "REVCLOUD",
                      "DIST", "ID", "AREA", "LIST",
@@ -3901,6 +3908,17 @@ class MainWindow(QMainWindow):
             echo=self.command_line.echo, apply=apply, args=args)
 
     # ZOOM [Extents/Window/Previous/nXP]
+    def _cmd_mleaderstyle(self, *args) -> None:
+        """MLEADERSTYLE: no manager yet -- say which style MLEADER uses."""
+        from core import leaders
+
+        if self.document is None:
+            return
+        name = leaders.mleader_style_name(self.document.doc)
+        self.command_line.echo(
+            tr("MLEADER uses the multileader style \"{name}\"; the style "
+               "manager is not available yet.", name=name))
+
     def _cmd_zoom(self, *args) -> Prompt | None:
         if args:
             return self._zoom_option(args[0])
