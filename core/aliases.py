@@ -93,6 +93,7 @@ DEFAULT_ALIASES: dict[str, str] = {
     "DIV": "DIVIDE",
     "ME": "MEASURE",
     "PU": "PURGE",
+    "W": "WBLOCK",
     "MA": "MATCHPROP",
     "HE": "HATCHEDIT",
     "UN": "UNITS",
