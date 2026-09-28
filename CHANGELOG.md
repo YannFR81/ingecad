@@ -33,6 +33,12 @@
   worker that dies or hangs costs a serial regen, never the drawing;
   `INGECAD_SERIAL_REGEN=1` turns it off. Sheets, Windows and macOS keep
   the serial path.
+- **A block placed many times is drawn once** (#29). ezdxf exploded a block
+  again for every reference; now, per regen of the model, each block is
+  recorded once and every reference replays it rotated and moved. Casa
+  Peregrinos' model 1.6 s → 1.0 s, Planos Constructivos' 5.4 s → 4.4 s.
+  It also fixes AutoCAD's filled dots (a donut wider than its diameter)
+  that came out with a notch.
 
 ### Georeferencing
 - **Any projected coordinate system, through PROJ** (#27). GEOREF's new

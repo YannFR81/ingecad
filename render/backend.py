@@ -14,7 +14,10 @@ shows facets until a future re-regen at view scale (known trade-off, F1).
 from __future__ import annotations
 
 import math
+import os
 from typing import Iterable, Optional
+
+import numpy as np
 
 from ezdxf import bbox
 from ezdxf.addons.drawing import Frontend, RenderContext
@@ -315,6 +318,57 @@ class VertexBackend(Backend):
     def finalize(self) -> None:
         pass
 
+    # -- block instancing (#29) --------------------------------------------------
+    def begin_capture(self) -> tuple:
+        """Record what is drawn from now on apart from the scene: a block's
+        content, drawn once at the origin. Returns what end_capture needs."""
+        saved = (self.buckets, self.images)
+        self.buckets, self.images = {}, []
+        return saved
+
+    def end_capture(self, saved) -> Optional[list]:
+        """The recording -- [(bucket key, template bucket, lines, triangles,
+        points as (n, 2) arrays)] -- or None when it cannot be replayed
+        (it drew a raster image). The scene's own buckets come back."""
+        import numpy as np
+
+        buckets, images = self.buckets, self.images
+        self.buckets, self.images = saved
+        if images:
+            return None
+        recording = []
+        for key, b in buckets.items():
+            arrays = tuple(np.asarray(v, dtype=np.float64).reshape(-1, 2)
+                           for v in (b.lines, b.triangles, b.points))
+            recording.append((key, b, *arrays))
+        return recording
+
+    def replay(self, recording, cos_a: float, sin_a: float,
+               dx: float, dy: float) -> None:
+        """A recording rotated by (cos_a, sin_a) and moved by (dx, dy), owned
+        by the entity being drawn -- one block reference, without ezdxf."""
+        handle = self._handle
+        for key, template, lines, triangles, points in recording:
+            bucket = self.buckets.get(key)
+            if bucket is None:
+                bucket = self.buckets[key] = Bucket(
+                    template.layer, template.color, template.lineweight,
+                    template.kind, group=template.group)
+            for xy, coords, owners, per in (
+                    (lines, bucket.lines, bucket.lines_owner, 2),
+                    (triangles, bucket.triangles, bucket.triangles_owner, 3),
+                    (points, bucket.points, bucket.points_owner, 1)):
+                if not len(xy):
+                    continue
+                x, y = xy[:, 0], xy[:, 1]
+                moved = np.empty_like(xy)
+                moved[:, 0] = x * cos_a - y * sin_a + dx
+                moved[:, 1] = x * sin_a + y * cos_a + dy
+                coords.extend(moved.ravel().tolist())
+                owners.extend([handle] * (len(xy) // per))
+            bucket.text_height_sum += template.text_height_sum
+            bucket.text_count += template.text_count
+
 
 def _point_in_ring(point, ring) -> bool:
     """Ray-cast point-in-polygon over a flattened ring (Vec2 list)."""
@@ -599,6 +653,9 @@ _DIMENSION_TYPES = frozenset(("DIMENSION", "ARC_DIMENSION"))
 _UNSET = object()
 
 
+_UNSEEN = object()
+
+
 class TolerantFrontend(Frontend):
     """Frontend that survives malformed entities.
 
@@ -761,6 +818,92 @@ class TolerantFrontend(Frontend):
         except Exception:
             return None
         return annotative.current_scale(doc) if in_model else None
+
+    #: Recordings of block content for this build, or None when block
+    #: references are drawn one by one (see draw_composite_entity).
+    _block_cache: Optional[dict] = None
+
+    def draw_composite_entity(self, entity, properties) -> None:
+        """A block reference drawn from a recording of its block (#29).
+
+        ezdxf explodes a block again for every reference to it -- a door
+        placed 80 times is tessellated 80 times. Within one build, the
+        block's content is drawn ONCE at the origin, unrotated, with this
+        reference's scale and resolved properties (ByBlock and layer-0
+        content take the reference's colour and layer), and every
+        reference that shares them replays it rotated and moved: the same
+        primitives, owned by the reference, so picking and hiding work as
+        before. Its attributes are drawn afterwards as ezdxf draws them.
+
+        Only in a plain model build: a sheet clips through its viewports in
+        ezdxf's pipeline, which a replay would bypass. MINSERT, a clipped
+        reference, a tilted extrusion and a block holding an image go the
+        usual way.
+        """
+        cache = self._block_cache
+        key = self._instance_key(entity, properties) if cache is not None else None
+        if key is None:
+            return super().draw_composite_entity(entity, properties)
+        backend = self.pipeline.backend
+        recording = cache.get(key, _UNSEEN)
+        if recording is _UNSEEN:
+            recording = cache[key] = self._record_block(entity, properties, backend)
+        if recording is None:
+            return super().draw_composite_entity(entity, properties)
+        angle = math.radians(entity.dxf.get("rotation", 0.0))
+        at = entity.dxf.insert
+        backend.replay(recording, math.cos(angle), math.sin(angle), at.x, at.y)
+        if entity.attribs:
+            self.ctx.push_state(properties)
+            try:
+                self.draw_entities(entity.attribs)
+            finally:
+                self.ctx.pop_state()
+
+    def _instance_key(self, entity, properties):
+        """What a recording depends on, or None when this reference cannot
+        be replayed."""
+        if entity.dxftype() != "INSERT" or entity.mcount > 1:
+            return None
+        extrusion = entity.dxf.get("extrusion", None)
+        if extrusion is not None and not (abs(extrusion[0]) < 1e-12
+                                          and abs(extrusion[1]) < 1e-12
+                                          and extrusion[2] > 0):
+            return None
+        if entity.has_extension_dict:
+            from ezdxf import xclip
+
+            clip = xclip.XClip(entity)
+            if clip.has_clipping_path and clip.is_clipping_enabled:
+                return None
+        backend = self.pipeline.backend
+        if not hasattr(backend, "replay"):
+            return None
+        props = tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v)
+                             for k, v in vars(properties).items()
+                             if isinstance(v, (str, int, float, bool, list, tuple))))
+        dxf = entity.dxf
+        return (dxf.name, dxf.get("xscale", 1.0), dxf.get("yscale", 1.0),
+                dxf.get("zscale", 1.0), props, backend._group, backend._kind,
+                self._anno_scale, self._anno_show_all)
+
+    def _record_block(self, entity, properties, backend):
+        """Draw the block's content once, at the origin and unrotated."""
+        proto = entity.copy()
+        proto.dxf.insert = (0.0, 0.0, 0.0)
+        proto.dxf.rotation = 0.0
+        saved = backend.begin_capture()
+        self.ctx.push_state(properties)
+        try:
+            self.draw_entities(
+                proto.virtual_entities(skipped_entity_callback=self.skip_entity))
+        except Exception as exc:              # noqa: BLE001 - draw it the usual way
+            logger.warning("block %s not recorded: %s", entity.dxf.name, exc)
+            backend.end_capture(saved)
+            return None
+        finally:
+            self.ctx.pop_state()
+        return backend.end_capture(saved)
 
     def draw_entity(self, entity, properties) -> None:
         substituted = False
@@ -1015,6 +1158,9 @@ def build_scene(document: Document, layout_name: str | None = None, *,
 
     groups = order_groups(layout)
     hidden = frozenset(hidden_handles(document))
+    # block references replay a recording of their block: the model only
+    instancing = (canvas is None and layout_name is None and layout.is_modelspace
+                  and os.environ.get("INGECAD_NO_INSTANCING", "") not in ("1", "true"))
 
     def make_frontend():
         # one recipe for the serial regen and for each parallel worker
@@ -1022,6 +1168,8 @@ def build_scene(document: Document, layout_name: str | None = None, *,
         context = TolerantRenderContext(document.doc)
         frontend = TolerantFrontend(context, backend, frontend_config(flatten))
         frontend.hidden_handles = hidden
+        if instancing:
+            frontend._block_cache = {}
         return frontend, backend
 
     parallel = None
