@@ -1013,23 +1013,40 @@ def build_scene(document: Document, layout_name: str | None = None, *,
 
     from core.isolate import hidden_handles
 
-    backend = VertexBackend(flatten, order_groups(layout))
-    context = TolerantRenderContext(document.doc)
-    frontend = TolerantFrontend(context, backend, frontend_config(flatten))
-    frontend.hidden_handles = frozenset(hidden_handles(document))
-    if canvas is not None and layout_name is None:
-        from ezdxf.addons.drawing.properties import LayoutProperties
+    groups = order_groups(layout)
+    hidden = frozenset(hidden_handles(document))
 
-        # what ezdxf's own draw_viewport does for the model inside a sheet
-        frontend.draw_layout(
-            layout, layout_properties=LayoutProperties.from_layout(canvas))
+    def make_frontend():
+        # one recipe for the serial regen and for each parallel worker
+        backend = VertexBackend(flatten, groups)
+        context = TolerantRenderContext(document.doc)
+        frontend = TolerantFrontend(context, backend, frontend_config(flatten))
+        frontend.hidden_handles = hidden
+        return frontend, backend
+
+    parallel = None
+    if canvas is None and layout_name is None and layout.is_modelspace:
+        from render import parallel as _parallel
+
+        parallel = _parallel.draw_parallel(make_frontend, layout)
+    if parallel is not None:
+        backend, skipped = parallel
     else:
-        frontend.draw_layout(layout)
-    if layout_name is not None:
-        _draw_viewport_borders(layout, context, backend)
+        frontend, backend = make_frontend()
+        if canvas is not None and layout_name is None:
+            from ezdxf.addons.drawing.properties import LayoutProperties
+
+            # what ezdxf's own draw_viewport does for the model inside a sheet
+            frontend.draw_layout(
+                layout, layout_properties=LayoutProperties.from_layout(canvas))
+        else:
+            frontend.draw_layout(layout)
+        if layout_name is not None:
+            _draw_viewport_borders(layout, frontend.ctx, backend)
+        skipped = frontend.skipped
     scene = pack(backend.buckets, _declared_extents(document),
                  images=backend.images)
-    scene.skipped = list(frontend.skipped)
+    scene.skipped = list(skipped)
     scene.layout_name = layout_name
     scene.flatten = flatten
     if layout_name is None:

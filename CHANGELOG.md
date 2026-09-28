@@ -24,6 +24,16 @@
   layer in one undo step, and lock or unlock a layer by picking one of
   its objects -- LAYULK reaches objects on the locked layer itself.
 
+### Speed
+- **Regenerating the model uses several cores** (#31, Linux). A full regen
+  is ezdxf's drawing frontend, pure Python, and ran on one core: the plan
+  is now drawn by forked workers, each taking runs of entities through the
+  very same drawing path, and stitched back in order. Plaza Yanque (10 000
+  objects): 4.2 s → 1.2 s, pixels identical within the serial noise. A
+  worker that dies or hangs costs a serial regen, never the drawing;
+  `INGECAD_SERIAL_REGEN=1` turns it off. Sheets, Windows and macOS keep
+  the serial path.
+
 ### Georeferencing
 - **Any projected coordinate system, through PROJ** (#27). GEOREF's new
   *Coordsys* option takes an EPSG code — `27700` for the British National
