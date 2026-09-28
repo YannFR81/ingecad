@@ -958,3 +958,355 @@ def to_polyline(entity):
     rows = _entity_chain_rows(entity)
     piece = ("LWPOLYLINE", [(x, y, 0.0, 0.0, b) for x, y, b in rows], False)
     return ReplaceEntitiesCommand("PEDIT", [entity], [_factory_for(piece, entity)])
+
+
+# -- LENGTHEN ------------------------------------------------------------------
+
+def _lwpoly_points(entity) -> list[Point]:
+    return [(float(p[0]), float(p[1])) for p in entity.get_points("xy")]
+
+
+def object_length(entity) -> float | None:
+    """The length LENGTHEN reports and works with; None for what it does
+    not touch (closed objects, circles, text...)."""
+    kind = entity.dxftype()
+    if kind == "LINE":
+        s, e = entity.dxf.start, entity.dxf.end
+        return math.hypot(e.x - s.x, e.y - s.y)
+    if kind == "ARC":
+        _cx, _cy, r, _a0, _a1 = ocs.arc_wcs(entity)
+        return math.radians(arc_included_angle(entity)) * r
+    if kind == "LWPOLYLINE" and not entity.closed:
+        rows = list(entity.get_points("xyseb"))
+        total = 0.0
+        for i in range(len(rows) - 1):
+            a, b = (rows[i][0], rows[i][1]), (rows[i + 1][0], rows[i + 1][1])
+            chord = math.dist(a, b)
+            bulge = float(rows[i][4])
+            if abs(bulge) > 1e-12 and chord > 0:
+                # an arc segment: chord and bulge give the included angle
+                theta = 4.0 * math.atan(abs(bulge))
+                total += chord * theta / (2.0 * math.sin(theta / 2.0))
+            else:
+                total += chord
+        return total
+    return None
+
+
+def arc_included_angle(entity) -> float:
+    _cx, _cy, _r, a0, a1 = ocs.arc_wcs(entity)
+    return _sweep(a0 % 360.0, a1 % 360.0) or 360.0
+
+
+def _lengthen_target(entity, pick: Point, mode: str, value: float,
+                     new_end: Point | None = None):
+    """Which end moves and the new total the object should have:
+    ``(which, total, is_angle)`` or None."""
+    kind = entity.dxftype()
+    if kind == "LINE":
+        s, e = entity.dxf.start, entity.dxf.end
+        which = "start" if math.dist(pick, (s.x, s.y)) < math.dist(pick, (e.x, e.y)) \
+            else "end"
+        length = object_length(entity)
+        if mode == "DY":
+            fixed = (e.x, e.y) if which == "start" else (s.x, s.y)
+            moving = (s.x, s.y) if which == "start" else (e.x, e.y)
+            if new_end is None or length == 0:
+                return None
+            ux, uy = (moving[0] - fixed[0]) / length, (moving[1] - fixed[1]) / length
+            total = (new_end[0] - fixed[0]) * ux + (new_end[1] - fixed[1]) * uy
+        elif mode == "DE":
+            total = length + value
+        elif mode == "P":
+            total = length * value / 100.0
+        else:                       # "T"
+            total = value
+        return which, total, False
+    if kind == "ARC":
+        cx, cy, r, a0, a1 = ocs.arc_wcs(entity)
+        start = (cx + r * math.cos(math.radians(a0)), cy + r * math.sin(math.radians(a0)))
+        end = (cx + r * math.cos(math.radians(a1)), cy + r * math.sin(math.radians(a1)))
+        which = "start" if math.dist(pick, start) < math.dist(pick, end) else "end"
+        angle = arc_included_angle(entity)
+        if mode == "DY":
+            if new_end is None:
+                return None
+            target = math.degrees(math.atan2(new_end[1] - cy, new_end[0] - cx))
+            total = _sweep(target, a1) if which == "start" else _sweep(a0, target)
+            return which, total, True
+        if mode == "DEA":           # delta angle
+            return which, angle + value, True
+        if mode == "TA":            # total angle
+            return which, value, True
+        if mode == "DE":            # delta length along the arc
+            return which, angle + math.degrees(value / r), True
+        if mode == "P":
+            return which, angle * value / 100.0, True
+        return which, math.degrees(value / r), True          # "T": total length
+    if kind == "LWPOLYLINE" and not entity.closed:
+        rows = list(entity.get_points("xyseb"))
+        pts = [(r[0], r[1]) for r in rows]
+        if len(pts) < 2:
+            return None
+        which = "start" if math.dist(pick, pts[0]) < math.dist(pick, pts[-1]) else "end"
+        seg = (pts[0], pts[1]) if which == "start" else (pts[-1], pts[-2])
+        if abs(float(rows[0 if which == "start" else -2][4])) > 1e-12:
+            return None             # an arc end segment: not handled
+        length = object_length(entity)
+        seg_len = math.dist(*seg)
+        if mode == "DY":
+            if new_end is None or seg_len == 0:
+                return None
+            fixed = seg[1]
+            ux, uy = (seg[0][0] - fixed[0]) / seg_len, (seg[0][1] - fixed[1]) / seg_len
+            new_seg = (new_end[0] - fixed[0]) * ux + (new_end[1] - fixed[1]) * uy
+            total = length - seg_len + new_seg
+        elif mode == "DE":
+            total = length + value
+        elif mode == "P":
+            total = length * value / 100.0
+        else:
+            total = value
+        return which, total, False
+    return None
+
+
+def _apply_lengthen(entity, which: str, total: float, is_angle: bool) -> bool:
+    kind = entity.dxftype()
+    if kind == "LINE":
+        s, e = entity.dxf.start, entity.dxf.end
+        fixed, moving = ((e.x, e.y), (s.x, s.y)) if which == "start" \
+            else ((s.x, s.y), (e.x, e.y))
+        length = math.dist(fixed, moving)
+        if length == 0 or total <= 0:
+            return False
+        ux, uy = (moving[0] - fixed[0]) / length, (moving[1] - fixed[1]) / length
+        new = (fixed[0] + ux * total, fixed[1] + uy * total)
+        if which == "start":
+            entity.dxf.start = (new[0], new[1], s.z)
+        else:
+            entity.dxf.end = (new[0], new[1], e.z)
+        return True
+    if kind == "ARC":
+        if not is_angle or total <= 0 or total >= 360.0:
+            return False
+        # the sweep is the same in WCS and OCS, so the OCS angles move by it
+        a0, a1 = entity.dxf.start_angle % 360.0, entity.dxf.end_angle % 360.0
+        if which == "start":
+            entity.dxf.start_angle = (a1 - total) % 360.0
+        else:
+            entity.dxf.end_angle = (a0 + total) % 360.0
+        return True
+    if kind == "LWPOLYLINE":
+        rows = [list(p) for p in entity.get_points("xyseb")]
+        pts = [(r[0], r[1]) for r in rows]
+        i_move, i_fix = (0, 1) if which == "start" else (len(pts) - 1, len(pts) - 2)
+        seg_len = math.dist(pts[i_move], pts[i_fix])
+        length = object_length(entity)
+        new_seg = total - (length - seg_len)
+        if seg_len == 0 or new_seg <= 0:
+            return False
+        ux = (pts[i_move][0] - pts[i_fix][0]) / seg_len
+        uy = (pts[i_move][1] - pts[i_fix][1]) / seg_len
+        rows[i_move][0] = pts[i_fix][0] + ux * new_seg
+        rows[i_move][1] = pts[i_fix][1] + uy * new_seg
+        entity.set_points([tuple(r) for r in rows], format="xyseb")
+        return True
+    return False
+
+
+class LengthenCommand(Command):
+    """LENGTHEN one object; undo restores its tags exactly."""
+
+    name = "LENGTHEN"
+
+    def __init__(self, entity, which: str, total: float, is_angle: bool) -> None:
+        self.entities = [entity]
+        self._which, self._total, self._is_angle = which, total, is_angle
+        self._before = None
+
+    def do(self, document) -> None:
+        entity = self.entities[0]
+        self._before = entity.copy()
+        _apply_lengthen(entity, self._which, self._total, self._is_angle)
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        _restore_entity(self.entities[0], self._before)
+        document.dirty = True
+
+
+def lengthen(entity, pick: Point, mode: str, value: float = 0.0,
+             new_end: Point | None = None):
+    """The LENGTHEN command for ``entity`` at ``pick``, or None when the
+    object cannot be lengthened (closed, a circle, an arc end segment...)
+    or the result would vanish.
+
+    ``mode``: ``DE`` delta length, ``DEA`` delta angle (arcs), ``P`` percent,
+    ``T`` total length, ``TA`` total angle (arcs), ``DY`` dynamic to
+    ``new_end``. The end that moves is the one nearest ``pick``
+    (LENGTHEN, p. 1035: "measured from the endpoint that is closest to the
+    selection point").
+    """
+    target = _lengthen_target(entity, pick, mode, value, new_end)
+    if target is None:
+        return None
+    which, total, is_angle = target
+    if total <= 1e-12 or (is_angle and total >= 360.0):
+        return None
+    return LengthenCommand(entity, which, total, is_angle)
+
+
+# -- ALIGN ---------------------------------------------------------------------
+
+def align_matrix(sources: list, destinations: list, scale: bool = False):
+    """The Matrix44 that takes the source points onto the destination
+    points: one pair moves; two pairs move and rotate, and scale when asked
+    by the ratio of the destination and source distances (ALIGN, p. 107).
+    A third pair is 3D tilt in AutoCAD; a 2D drawing has none, so only the
+    first two pairs count."""
+    from ezdxf.math import Matrix44
+
+    s1, d1 = sources[0], destinations[0]
+    if len(sources) < 2 or len(destinations) < 2:
+        return Matrix44.translate(d1[0] - s1[0], d1[1] - s1[1], 0)
+    s2, d2 = sources[1], destinations[1]
+    a_src = math.atan2(s2[1] - s1[1], s2[0] - s1[0])
+    a_dst = math.atan2(d2[1] - d1[1], d2[0] - d1[0])
+    factor = 1.0
+    if scale:
+        ls, ld = math.dist(s1, s2), math.dist(d1, d2)
+        if ls > 0 and ld > 0:
+            factor = ld / ls
+    m = Matrix44.translate(-s1[0], -s1[1], 0)
+    m @= Matrix44.z_rotate(a_dst - a_src)
+    if factor != 1.0:
+        m @= Matrix44.scale(factor, factor, 1.0)
+    m @= Matrix44.translate(d1[0], d1[1], 0)
+    return m
+
+
+def align_entities(entities, sources: list, destinations: list,
+                   scale: bool = False):
+    from core.actions import TransformCommand
+
+    return TransformCommand("ALIGN", entities,
+                            align_matrix(sources, destinations, scale))
+
+
+# -- SCALETEXT -----------------------------------------------------------------
+
+TEXT_KINDS = ("TEXT", "MTEXT", "ATTRIB", "ATTDEF")
+
+#: SCALETEXT base-point options -> (horizontal 0..1, vertical 0..1) on the
+#: text's own box; None means Existing, the object's own alignment point.
+#: Left is BL for single-line text (SCALETEXT, p. 1698).
+SCALETEXT_BASES = {
+    "E": None,
+    "L": (0.0, 0.0), "C": (0.5, 0.0), "M": (0.5, 0.5), "R": (1.0, 0.0),
+    "TL": (0.0, 1.0), "TC": (0.5, 1.0), "TR": (1.0, 1.0),
+    "ML": (0.0, 0.5), "MC": (0.5, 0.5), "MR": (1.0, 0.5),
+    "BL": (0.0, 0.0), "BC": (0.5, 0.0), "BR": (1.0, 0.0),
+}
+
+
+def text_height_of(entity) -> float | None:
+    """The height SCALETEXT scales: TEXT/ATTRIB height, MTEXT char_height."""
+    if entity.dxftype() not in TEXT_KINDS:
+        return None
+    if entity.dxftype() == "MTEXT":
+        return float(entity.dxf.get("char_height", 0.0)) or None
+    return float(entity.dxf.get("height", 0.0)) or None
+
+
+_H_FRACTION = {"LEFT": 0.0, "ALIGNED": 0.0, "FIT": 0.0, "BOTTOM_LEFT": 0.0,
+               "MIDDLE_LEFT": 0.0, "TOP_LEFT": 0.0,
+               "CENTER": 0.5, "MIDDLE": 0.5, "BOTTOM_CENTER": 0.5,
+               "MIDDLE_CENTER": 0.5, "TOP_CENTER": 0.5}
+_V_FRACTION = {"MIDDLE": 0.5, "MIDDLE_LEFT": 0.5, "MIDDLE_CENTER": 0.5,
+               "MIDDLE_RIGHT": 0.5, "TOP_LEFT": 1.0, "TOP_CENTER": 1.0,
+               "TOP_RIGHT": 1.0}
+
+
+def _text_box(entity):
+    """(origin, width, height, rotation_deg) of the text's box in WCS,
+    origin at its bottom-left, or None if it cannot be measured."""
+    try:
+        from ezdxf.tools.text_size import mtext_size, text_size
+
+        if entity.dxftype() == "MTEXT":
+            size = mtext_size(entity)
+            width, height = float(size.total_width), float(size.total_height)
+            ins = entity.dxf.insert
+            ap = int(entity.dxf.get("attachment_point", 1))
+            col, row = (ap - 1) % 3, (ap - 1) // 3       # row 0 = top
+            fx, fy = (0.0, 0.5, 1.0)[col], (1.0, 0.5, 0.0)[row]
+        else:
+            size = text_size(entity)
+            width, height = float(size.width), float(size.cap_height)
+            align, p1, p2 = entity.get_placement()
+            name = align.name
+            ins = p2 if (p2 is not None and name not in ("LEFT", "ALIGNED", "FIT")) else p1
+            fx = _H_FRACTION.get(name, 1.0)
+            fy = _V_FRACTION.get(name, 0.0)
+        rotation = float(entity.dxf.get("rotation", 0.0))
+        rad = math.radians(rotation)
+        ux, uy = math.cos(rad), math.sin(rad)
+        vx, vy = -uy, ux
+        ox = ins.x - (ux * width * fx + vx * height * fy)
+        oy = ins.y - (uy * width * fx + vy * height * fy)
+        return (ox, oy), width, height, rotation
+    except Exception:                                 # noqa: BLE001
+        return None
+
+
+def scaletext_base_point(entity, option: str) -> Point | None:
+    """Where ``entity`` stays put when SCALETEXT scales it."""
+    frac = SCALETEXT_BASES.get(option.upper())
+    if frac is None:
+        if entity.dxftype() == "MTEXT":
+            ins = entity.dxf.insert
+            return (ins.x, ins.y)
+        align, p1, p2 = entity.get_placement()
+        p = p2 if (p2 is not None and align.name not in ("LEFT", "ALIGNED", "FIT")) else p1
+        return (p.x, p.y)
+    box = _text_box(entity)
+    if box is None:
+        ins = entity.dxf.insert
+        return (ins.x, ins.y)
+    (ox, oy), width, height, rotation = box
+    rad = math.radians(rotation)
+    ux, uy = math.cos(rad), math.sin(rad)
+    vx, vy = -uy, ux
+    fx, fy = frac
+    return (ox + ux * width * fx + vx * height * fy,
+            oy + uy * width * fx + vy * height * fy)
+
+
+def scale_texts(entities, base_option: str, *, height: float | None = None,
+                factor: float | None = None):
+    """SCALETEXT: every text object scaled about its own base point, as one
+    undo step. Either a new ``height`` for all or one ``factor``."""
+    from ezdxf.math import Matrix44
+
+    from core.actions import TransformCommand
+    from core.commands import CompositeCommand
+
+    commands = []
+    for entity in entities:
+        current = text_height_of(entity)
+        if not current:
+            continue
+        f = factor if factor is not None else (height / current if height else None)
+        if f is None or f <= 0:
+            continue
+        base = scaletext_base_point(entity, base_option)
+        if base is None:
+            continue
+        m = Matrix44.translate(-base[0], -base[1], 0)
+        m @= Matrix44.scale(f, f, 1.0)
+        m @= Matrix44.translate(base[0], base[1], 0)
+        commands.append(TransformCommand("SCALETEXT", [entity], m))
+    if not commands:
+        return None
+    return CompositeCommand("SCALETEXT", commands)
