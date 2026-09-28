@@ -1343,6 +1343,8 @@ class MainWindow(QMainWindow):
         item(tools_menu, tr("QuickCalc"), self._cmd_quickcalc)
         item(tools_menu, tr("Group..."), self._cmd_group)
         item(tools_menu, tr("Plugins..."), self._cmd_plugins)
+        item(tools_menu, tr("Load Application..."), self._cmd_appload)
+        item(tools_menu, tr("Run Script..."), self._cmd_script)
         inquiry_menu = tools_menu.addMenu(tr("Inquiry"))
         cmd_item(inquiry_menu, tr("Distance"), "DIST", icon=False)
         cmd_item(inquiry_menu, tr("Area"), "AREA", icon=False)
@@ -1436,6 +1438,72 @@ class MainWindow(QMainWindow):
                 act.triggered.connect(
                     lambda _=False, n=entry.command: self._invoke_command(n))
                 menu.addAction(act)
+
+    def _cmd_appload(self, *args) -> None:
+        """APPLOAD (p. 125): load and run a Python file over ``actions``
+        (Tools > Load Application...). Everything it draws is one undo step."""
+        from pathlib import Path
+
+        from core import scripting
+        from views import file_dialogs
+
+        if self.document is None:
+            self.new_document()
+        path = args[0] if args else file_dialogs.get_open_file(
+            self, tr("Load Application"), tr("Python files (*.py)"))
+        if not path:
+            return
+        path = Path(path)
+        if not path.is_file():
+            self.command_line.echo(tr("Cannot find file {path}.", path=str(path)))
+            return
+        count, error = scripting.run_python(path, self)
+        if error:
+            self.command_line.echo(tr("{name}: {error}", name=path.name, error=error))
+        self.command_line.echo(
+            tr("{name} loaded: {count} command(s), one undo step.",
+               name=path.name, count=count))
+        if count:
+            self.tools.changed.emit()
+
+    def _cmd_script(self, *args) -> None:
+        """SCRIPT (p. 1699): run an AutoCAD .scr, one command-line entry per
+        line, from a timer so the screen keeps up (Tools > Run Script...)."""
+        from pathlib import Path
+
+        from PySide6.QtCore import QTimer
+
+        from core import scripting
+        from views import file_dialogs
+
+        path = args[0] if args else file_dialogs.get_open_file(
+            self, tr("Select Script File"), tr("Script files (*.scr)"))
+        if not path:
+            return
+        path = Path(path)
+        if not path.is_file():
+            self.command_line.echo(tr("Cannot find file {path}.", path=str(path)))
+            return
+        runner = scripting.ScriptRunner.from_file(path, self._on_command_submitted)
+        self._script_runner = runner
+
+        def step() -> None:
+            if getattr(self, "_script_runner", None) is not runner:
+                return                      # another script took over, or Esc
+            wait = runner.step()
+            if wait is None:
+                self._script_runner = None
+                return
+            QTimer.singleShot(wait, step)
+
+        step()
+
+    def run_script_to_end(self) -> None:
+        """Headless: finish the running .scr synchronously (tests)."""
+        runner = getattr(self, "_script_runner", None)
+        while runner is not None and runner.step() is not None:
+            pass
+        self._script_runner = None
 
     def _cmd_plugins(self, *args) -> None:
         """PLUGINS: the manager (Tools > Plugins...)."""
@@ -2953,6 +3021,8 @@ class MainWindow(QMainWindow):
         d.register("PAN", self._cmd_pan)
         d.register("REGEN", self._cmd_regen)
         d.register("OPTIONS", self._cmd_options)
+        d.register("APPLOAD", self._cmd_appload)
+        d.register("SCRIPT", self._cmd_script)
         d.register("UNISOLATEOBJECTS", self._cmd_unisolate)
         d.register("QSELECT", self._cmd_qselect)
         d.register("FIND", self._cmd_find)

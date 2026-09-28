@@ -71,6 +71,8 @@ DEFAULT_ALIASES: dict[str, str] = {
     "DIMBASE": "DIMBASELINE",
     "DIMTED": "DIMTEDIT",
     "Z": "ZOOM",
+    "AP": "APPLOAD",
+    "SCR": "SCRIPT",
     "P": "PAN",
     "DI": "DIST",
     "AA": "AREA",

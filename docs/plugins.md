@@ -102,3 +102,82 @@ They are the project's own, not extra ones:
 `ingecad --check` (or `python main.py --check`) lists the plugins found and
 names any bundled one that cannot run — the same silent-loss check the
 language packs get.
+
+## Scripts: APPLOAD and SCRIPT
+
+Not everything deserves a plugin. A one-off job -- number two hundred points,
+draw a grid, rename layers -- is a **Python file** run with `APPLOAD` (alias
+`AP`, Tools > Load Application...). It runs once, right away, with this in
+scope:
+
+| name | what it is |
+|---|---|
+| `actions` | `core.actions`: every headless command (`add_line`, `add_circle`, `TransformCommand`, ...) |
+| `execute(cmd)` | run a Command through the history: undoable |
+| `command("LINE")` | type something at the command line |
+| `document`, `doc`, `msp` | the open drawing, its ezdxf `Drawing`, its modelspace |
+| `echo(text)` | write to the command window |
+| `ezdxf` | the library itself, for anything `actions` does not cover |
+
+Everything the file executes is folded into **one undo step** named after the
+file. A worked example, `grid.py`:
+
+```python
+for i in range(11):
+    execute(actions.add_line((0, i * 10), (100, i * 10)))
+    execute(actions.add_line((i * 10, 0), (i * 10, 100)))
+echo("grid drawn")
+```
+
+If the script raises, what it did before the error stays (undoable) and the
+last line of the traceback is echoed.
+
+`SCRIPT` (alias `SCR`, Tools > Run Script...) runs an AutoCAD `.scr`: one
+command-line entry per line, a blank line is Enter, `DELAY 500` waits half a
+second, `RSCRIPT` repeats from the top, `;` starts a comment. The script that
+worked in AutoCAD works here as long as its commands exist in IngeCAD.
+
+## Worked examples for a plugin
+
+**A command with prompts.** A tool is a `tools.base.Tool` subclass; its
+prompts take AutoCAD's wording with the English option letters, and every
+mutation goes through `ctx.execute`:
+
+```python
+from tools.base import Tool
+from core import actions
+
+class Star(Tool):
+    name = "STAR"
+
+    def on_start(self):
+        self.prompt("Specify center point:")
+
+    def on_point(self, p):
+        if self.last_point is None:
+            self.last_point = p
+            self.prompt("Specify radius or [Points] <5>:")
+        else:
+            r = ((p[0] - self.last_point[0]) ** 2 + (p[1] - self.last_point[1]) ** 2) ** 0.5
+            self.ctx.execute(actions.add_polygon(self.last_point, r, 5))   # one undo step
+            self.ctx.finish()
+```
+
+Register it in the spec: `tools={"STAR": Star}`, `aliases={"ST": "STAR"}`.
+
+**A menu and a toolbar.** Labels are English and translated through the
+plugin's own `i18n/<lang>/ui.json`:
+
+```python
+PLUGIN = PluginSpec(
+    id="stars", name="Stars", version="0.1",
+    tools={"STAR": Star},
+    menu=(MenuItem("Star", "STAR"), SEPARATOR,
+          Submenu("More", (MenuItem("Big star", "STAR"),))),
+    toolbar=(ToolbarItem("Star", "STAR", icon=Path(__file__).parent / "star.svg"),),
+)
+```
+
+The toolbar is off by default (View > Toolbars turns it on); turning the
+plugin off removes the menu, the toolbar, the commands and the aliases, and
+`tests/test_plugins.py` holds every bundled plugin to that.
