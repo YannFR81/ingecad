@@ -3099,16 +3099,18 @@ class MainWindow(QMainWindow):
                 tr("That viewport has no usable view — set its scale first "
                    "(Z + nXP), or fit it."))
             return
-        self.tools.clear_selection()      # entering MSPACE deselects (AutoCAD)
+        self.tools.cancel()               # a sheet command cannot go on inside
+        self.tools.viewport_crossed()     # entering MSPACE deselects (AutoCAD)
         self._active_vp = vp
         self.viewport.active_vp_rect = layout_ops.viewport_rect(vp)
         self.viewport.sync_cursor_shape()
         # Everything the mouse says is paper and everything the model
         # answers is model: the projection goes to the two layers that
-        # cross it, the tool controller (points) and the canvas (matrices).
+        # cross it, the tool controller (points, readout) and the canvas
+        # (matrices). No index or snap engine is built for the model: a
+        # viewport navigates, it does not edit (ToolController.start_tool).
         self.viewport.space_placement = placement
-        self.tools.space_changed()        # index, snap and tolerance are the
-        self.viewport.update()            # model's now, not the sheet's
+        self.viewport.update()
         self._vp_warm_live_scene()
         label = layout_ops.scale_label(layout_ops.viewport_scale(vp))
         if layout_ops.is_viewport_locked(vp):
@@ -3117,8 +3119,10 @@ class MainWindow(QMainWindow):
                    "VPLOCK to unlock). PSPACE returns to paper.", scale=label))
         else:
             self.command_line.echo(
-                tr("Viewport active (scale {scale}). Z + nXP sets the exact "
-                   "scale (e.g. 1/100XP); PSPACE returns to paper.", scale=label))
+                tr("Viewport active (scale {scale}): wheel and pan move the "
+                   "view, Z + nXP sets the exact scale (e.g. 1/100XP), VPLOCK "
+                   "locks it. PSPACE returns to paper; edit in the Model tab.",
+                   scale=label))
         self._update_space_button()
         self._refresh_vp_scale_combo()
 
@@ -3338,9 +3342,24 @@ class MainWindow(QMainWindow):
         which is the whole cost this cache exists to avoid."""
         self._vp_model_cache = None
         if getattr(self, "_active_vp", None) is not None:
-            # editing inside a viewport: rebuild the live model now, in the
+            # an undo inside a viewport: rebuild the live model now, in the
             # background, so the next pan finds it (or waits, never freezes)
             self._vp_warm_live_scene()
+
+    def _vp_live_key(self):
+        """What the live model scene depends on: the document and the
+        units of the sheet it is drawn through -- NOT the sheet itself.
+        Every sheet is white paper, so the model tessellates the same for
+        all of them; keyed per layout, each tab switch rebuilt the whole
+        model (2.3 s on Planos Constructivos, with the GUI mute for 0.5 s
+        when it landed), for identical vertices."""
+        units = 0
+        try:
+            sheet = self.document.doc.layouts.get(self._active_layout)
+            units = int(getattr(sheet, "units", 0) or 0)
+        except Exception:      # noqa: BLE001 - the Model tab, or a gone sheet
+            pass
+        return (self.document, units)
 
     def _vp_model_scene(self):
         """The model, tessellated once for live viewport navigation --
@@ -3348,7 +3367,7 @@ class MainWindow(QMainWindow):
         like the bake it stands in for (ACI 7 black on paper, not the
         model canvas's white)."""
         cached = getattr(self, "_vp_model_cache", None)
-        key = (self.document, self._active_layout)
+        key = self._vp_live_key()
         if cached is not None and cached[0] == key:
             return cached[1]
         worker = getattr(self, "_vp_live_worker", None)
@@ -3371,7 +3390,7 @@ class MainWindow(QMainWindow):
         the build starts in the background and this tick draws nothing;
         the display catches up when it lands."""
         cached = getattr(self, "_vp_model_cache", None)
-        if cached is not None and cached[0] == (self.document, self._active_layout):
+        if cached is not None and cached[0] == self._vp_live_key():
             return cached[1]
         self._vp_warm_live_scene()
         return None
@@ -3379,9 +3398,9 @@ class MainWindow(QMainWindow):
     def _vp_warm_live_scene(self) -> None:
         """Start building the live model scene in the background, unless
         it is cached or already being built."""
-        if self.document is None:
+        if self.document is None or self._active_layout == "Model":
             return
-        key = (self.document, self._active_layout)
+        key = self._vp_live_key()
         cached = getattr(self, "_vp_model_cache", None)
         if cached is not None and cached[0] == key:
             return
@@ -3394,7 +3413,7 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_live_scene_done(self, key, scene) -> None:
-        if scene is None or key != (self.document, self._active_layout):
+        if scene is None or self.document is None or key != self._vp_live_key():
             return
         if getattr(self, "_vp_model_cache", None) is None:
             self._vp_model_cache = (key, scene)
@@ -3590,7 +3609,7 @@ class MainWindow(QMainWindow):
             self.regen_in_memory()
         self.viewport.space_placement = None
         if had:
-            self.tools.space_changed()    # back to the sheet's own entities
+            self.tools.viewport_crossed()   # back to the sheet's own entities
         if getattr(self.viewport, "active_vp_rect", None) is not None:
             self.viewport.active_vp_rect = None
             self.viewport.sync_cursor_shape()     # the crosshair, sheet-wide
@@ -3621,7 +3640,7 @@ class MainWindow(QMainWindow):
         # text out there opened its editor instead of leaving the viewport,
         # which is what a tester met as "me costó salir de la ventana".
         entity = None
-        if self.tools.in_active_viewport(wx, wy):
+        if self._active_vp is None:
             entity = self.tools.pick_entity((wx, wy))
         if entity is not None and entity.dxftype() != "VIEWPORT":
             if self.tools.open_text_editor_for(entity):

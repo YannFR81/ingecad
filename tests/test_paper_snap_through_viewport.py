@@ -164,19 +164,16 @@ def test_a_dimension_with_a_point_of_the_sheets_own_measures_paper(qapp):
 
 
 def test_inside_mspace_the_model_engine_is_not_used(qapp):
-    """MSPACE already edits the model through the projection: the snap
-    there comes from the current space's own engine, as before."""
+    """Inside a viewport nothing is edited, so nothing snaps: neither the
+    sheet's engine nor the model's is asked (tests/test_mspace_editing.py
+    says why)."""
     win, t, vp = _window(qapp)
     try:
         win._activate_viewport(vp)
         qapp.processEvents()
-        t.start_tool("LINE")
         t._model_snap_engine = None
         t.on_hover(150.4, 100.3, threshold_world=2.0)
-        assert t.snap_hit is not None
-        assert t.snap_hit.via is None
-        assert (t.snap_hit.x, t.snap_hit.y) == pytest.approx((5000.0, 3000.0)), (
-            "a MODEL point, as MSPACE answers")
+        assert t.snap_hit is None
         assert t._model_snap_engine is None
     finally:
         win.close()

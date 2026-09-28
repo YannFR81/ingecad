@@ -180,6 +180,7 @@ def _fork_and_merge(make_frontend, model, min_cost, processes, plan,
                 max_workers=min(processes, len(jobs)),
                 mp_context=multiprocessing.get_context("fork"))
             try:
+                _spawn_gently(pool)
                 # the children fork on the first submit, inside this filter
                 parts = list(pool.map(_run_share, range(len(jobs)),
                                       timeout=TIMEOUT_S))
@@ -194,6 +195,36 @@ def _fork_and_merge(make_frontend, model, min_cost, processes, plan,
     finally:
         _WORK = None
     return _merge(make_frontend()[1], parts)
+
+
+#: Pause between two forks, so the GUI thread gets the interpreter back.
+FORK_BREATH_S = 0.006
+
+
+def _spawn_gently(pool) -> None:
+    """Start the pool's workers one by one with a pause in between.
+
+    A fork of the window's process holds the GIL for ~20 ms (its page
+    tables: a real plan open is a gigabyte), and the executor forks all of
+    them back to back on the first submit -- eight in a row froze the GUI
+    for 160-240 ms at the start of EVERY parallel regen, on every edit of a
+    big plan and every sheet switch (measured, Planos Constructivos). Spread
+    out, they are eight hiccups of a frame each. ``_spawn_process`` is the
+    executor's own (3.9+) and spawns only the missing workers afterwards;
+    without it the executor forks the burst as before.
+    """
+    import time
+
+    spawn = getattr(pool, "_spawn_process", None)
+    processes = getattr(pool, "_processes", None)
+    if spawn is None or processes is None:
+        return
+    try:
+        while len(processes) < pool._max_workers:
+            spawn()
+            time.sleep(FORK_BREATH_S)
+    except Exception:                         # noqa: BLE001 - the burst, then
+        return
 
 
 def _viewports_see_only(share) -> None:

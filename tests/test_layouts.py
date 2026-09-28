@@ -1084,7 +1084,7 @@ def test_a_pan_tick_places_the_model_by_matrix(qapp):
     is tessellated once and each tick sets a matrix."""
     win, t, vp = _layout_window(qapp)
     win._active_vp = vp
-    win._vp_model_cache = ((win.document, win._active_layout), win._vp_model_scene())      # as the activation's warm-up leaves it
+    win._vp_model_cache = (win._vp_live_key(), win._vp_model_scene())      # as the activation's warm-up leaves it
     before = win.viewport._scene
     assert win.vp_view_pan(5.0, 2.0)
     assert win.viewport._live_vp is not None       # placed, not rebuilt
@@ -1179,7 +1179,7 @@ def test_live_viewport_matrix_matches_the_baked_placement(qapp):
                               view_center_point=(50, 25), view_height=60)
         win._active_layout = "Layout1"
         win._active_vp = vp
-        win._vp_model_cache = ((win.document, win._active_layout), win._vp_model_scene())
+        win._vp_model_cache = (win._vp_live_key(), win._vp_model_scene())
         assert win._vp_live_draw() is True
 
         live = win.viewport._live_vp[0]
@@ -1223,7 +1223,7 @@ def test_live_navigation_keeps_every_viewport_drawn(qapp):
                                  view_center_point=(50, 25), view_height=15)
         win._active_layout = "Layout1"
         win._active_vp = small          # navigating the SMALL one
-        win._vp_model_cache = ((win.document, win._active_layout), win._vp_model_scene())
+        win._vp_model_cache = (win._vp_live_key(), win._vp_model_scene())
 
         assert win._vp_live_draw() is True
         live = win.viewport._live_vp

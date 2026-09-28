@@ -262,13 +262,12 @@ def test_editing_tools_run_on_a_layout_tab(qapp):
         assert t.active(), "MOVE was refused on the sheet"
         t.cancel()
 
-        # ... and inside a viewport too, where they reach the MODEL through
-        # its projection (see tests/test_mspace_editing.py). What flips is
-        # the sheet's OWN commands: a viewport is made on the paper.
+        # ... but not inside a viewport, which only navigates the model
+        # (see tests/test_mspace_editing.py): every command waits for
+        # PSPACE or the Model tab.
         win._activate_viewport(vp)
         t.start_tool("MOVE")
-        assert t.active(), "MOVE was refused inside a viewport"
-        t.cancel()
+        assert not t.active(), "MOVE ran inside a viewport"
         t.start_tool("MVIEW")
         assert not t.active()
     finally:

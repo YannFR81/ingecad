@@ -196,17 +196,22 @@ def test_inside_mspace_every_aperture_shrinks_by_the_viewport_scale(qapp):
         _move(win, sx, sy)
         assert t._pick_tolerance == pytest.approx(
             win.viewport._pickbox_px / scale / factor)
-
+        # the same conversion feeds the snap aperture and the dimension
+        # magnet; inside a viewport no tool runs (navigation only), so the
+        # three answers are compared on the sheet, where the factor is 1
+        win._deactivate_viewport()
+        _move(win, sx, sy)
+        assert t._pick_tolerance == pytest.approx(win.viewport._pickbox_px / scale)
         spy = _SpyEngine()
         t.snap_engine = spy
         t.start_tool("LINE")
         _move(win, sx + 1, sy)
-        assert spy.thresholds[-1] == pytest.approx(12.0 / scale / factor)
+        assert spy.thresholds[-1] == pytest.approx(12.0 / scale)
 
         t.cancel()
         t.start_tool("DIMLINEAR")
         assert t.tool is not None
-        assert t.tool._align_threshold() == pytest.approx(12.0 / scale / factor)
+        assert t.tool._align_threshold() == pytest.approx(12.0 / scale)
     finally:
         t.cancel()
         win.document.dirty = False

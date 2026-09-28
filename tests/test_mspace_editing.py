@@ -1,17 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeCAD contributors.
-"""Editing the model THROUGH a floating viewport (MSPACE).
+"""The model THROUGH a floating viewport (MSPACE): navigation only.
 
 The third state of a layout tab (see
 ``docs/reference/layout/autocad-editing-in-paperspace.md``): the canvas keeps
-showing the sheet, one viewport is current, and every command edits the
-modelspace through that viewport's projection.
+showing the sheet, one viewport is current, and the wheel, pan, ZOOM (nXP,
+Extents, Window) and VPLOCK act on that viewport's view of the model. Nothing
+is picked, snapped or drawn through it -- Marco's decision of 2026-09-28,
+measured: the pick index and snap engine of a real plan's model cost 2 s of
+GIL on every double-click and left the GUI mute for 0.4 s, for a way of
+editing that his flow never uses (draw in Model, compose and plot on sheets).
 
-Two directions have to hold at once, and each test says which:
-  * what the mouse gives is PAPER and has to arrive as MODEL (picking,
-    snapping, the points a tool collects);
-  * what the tools answer is MODEL and has to be drawn on PAPER (highlight,
-    grips, previews, the GL overlay).
+The projection still crosses two layers, and each test says which:
+  * what the mouse gives is PAPER and has to arrive as MODEL (the coordinate
+    readout, ZOOM Window, the click that makes another viewport current);
+  * what the model answers has to be drawn on PAPER (the live view, the
+    crosshair clipped to the frame).
 """
 from __future__ import annotations
 
@@ -195,23 +199,49 @@ def test_entering_a_viewport_makes_the_model_the_current_space(qapp):
         win.close()
 
 
-def test_a_click_inside_the_viewport_picks_the_model_through_it(qapp):
+def test_a_click_inside_the_viewport_selects_nothing(qapp):
+    """A viewport navigates; it does not pick the model through the paper."""
     win, t, vp = _window(qapp)
     try:
         _enter(qapp, win, vp)
         t._pick_tolerance = 2.0
         t.on_click(160.0, 100.0)          # paper: the middle of the model line
-        assert t.selection, "the model line did not select through the viewport"
-        picked = t.index.entity(next(iter(t.selection)))
-        assert picked.dxftype() == "LINE"
-        assert picked.dxf.start.x == pytest.approx(5000.0)
+        assert not t.selection, "the model line selected through the viewport"
 
-        # The inverse: the SAME paper point on the sheet selects nothing of
-        # the model -- no selection crosses the two spaces.
+        # The inverse: the sheet's own click still selects the sheet's own
+        # entities, or the rule above could be "clicks never select".
         win._deactivate_viewport()
         t._pick_tolerance = 2.0
-        t.on_click(160.0, 100.0)
-        assert not t.selection
+        t.on_click(622.0, 42.0)           # the title block text
+        assert t.selection
+    finally:
+        win.close()
+
+
+def test_entering_a_viewport_builds_no_caches_and_keeps_the_sheets(qapp):
+    """The lag Marco felt on the double-click: the warmer that indexed the
+    whole model for editing. Nothing is edited there now, so nothing is
+    built -- and the sheet's own index survives the round trip."""
+    win, t, vp = _window(qapp)
+    try:
+        win.switch_layout("Layout1")
+        _wait_regen(qapp, win)
+        while t._warmers:
+            qapp.processEvents()
+        t._pick_tolerance = 2.0
+        t.on_click(622.0, 42.0)           # builds/uses the sheet's index
+        assert t.selection
+        sheet_index = t.index
+        assert sheet_index is not None and not sheet_index._dirty
+
+        win._activate_viewport(vp)
+        assert not t._warmers, "a cache warmer started on entering a viewport"
+        assert not t.selection, "the selection crossed into MSPACE"
+        assert t.index is sheet_index and not sheet_index._dirty
+
+        win._deactivate_viewport()
+        assert not t._warmers, "leaving rebuilt the sheet's caches"
+        assert t.index is sheet_index and not sheet_index._dirty
     finally:
         win.close()
 
@@ -269,50 +299,43 @@ def test_a_click_in_another_viewport_makes_that_one_current(qapp):
         win.close()
 
 
-def test_drawing_in_a_viewport_lands_in_the_model_at_model_coordinates(qapp):
+def test_drawing_commands_are_refused_inside_a_viewport(qapp):
     win, t, vp = _window(qapp)
     try:
         _enter(qapp, win, vp)
         before = len(win.document.doc.modelspace())
+        said = []
+        win.command_line.echo = lambda text, *a, **k: said.append(text)
         t.start_tool("LINE")
-        assert t.active(), "LINE was refused inside a viewport"
-        t.osnap_on = False                  # a bare coordinate, not a snap
-        t.on_click(150.0, 100.0)            # model (5000, 3000)
-        t.on_click(170.0, 100.0)            # model (5100, 3000)
-        t.cancel()
-        msp = win.document.doc.modelspace()
-        assert len(msp) == before + 1, "the line did not land in the model"
-        line = msp[-1]
-        assert line.dxftype() == "LINE"
-        assert (line.dxf.start.x, line.dxf.start.y) == pytest.approx(
-            (5000.0, 3000.0))
-        assert (line.dxf.end.x, line.dxf.end.y) == pytest.approx(
-            (5100.0, 3000.0))
-        # and nothing was added to the sheet
+        assert not t.active(), "LINE ran inside a viewport"
+        assert said and "not available inside a viewport" in said[-1]
+        t.on_click(150.0, 100.0)
+        t.on_click(170.0, 100.0)
+        assert len(win.document.doc.modelspace()) == before
         assert not [e for e in win.document.doc.layouts.get("Layout1")
                     if e.dxftype() == "LINE"]
+
+        # the inverse: the same command runs on the sheet once the
+        # viewport is left
+        win._deactivate_viewport()
+        t.start_tool("LINE")
+        assert t.active()
+        t.cancel()
     finally:
         win.close()
 
 
-def test_undoing_a_viewport_edit_reaches_the_model_from_the_sheet(qapp):
-    """The v0.4.6 lesson, one space deeper: a command asks "which space?"
-    once, when it runs -- never again at undo time, when the answer may have
-    changed under it."""
+def test_entering_a_viewport_ends_the_sheets_running_command(qapp):
+    """A LINE started on the sheet cannot collect points inside a viewport
+    (they would be model points); the double-click ends it, like Esc."""
     win, t, vp = _window(qapp)
     try:
-        _enter(qapp, win, vp)
+        win.switch_layout("Layout1")
+        _wait_regen(qapp, win)
         t.start_tool("LINE")
-        t.osnap_on = False
-        t.on_click(150.0, 100.0)
-        t.on_click(170.0, 100.0)
-        t.cancel()
-        msp = win.document.doc.modelspace()
-        added = len(msp)
-
-        win._deactivate_viewport()          # back to the sheet, then undo
-        win._cmd_undo()
-        assert len(msp) == added - 1, "undo did not reach the model"
+        assert t.active()
+        win._activate_viewport(vp)
+        assert not t.active(), "the sheet's command survived into MSPACE"
     finally:
         win.close()
 
@@ -347,31 +370,38 @@ def test_the_canvas_draws_model_answers_on_the_paper(qapp):
         win.close()
 
 
-def test_snapping_inside_a_viewport_finds_model_geometry(qapp):
+def test_hovering_inside_a_viewport_snaps_to_nothing(qapp):
+    """No tool can run there, so no snap engine for the model is built:
+    the hover neither snaps nor pays the model walk."""
     win, t, vp = _window(qapp)
     try:
         _enter(qapp, win, vp)
-        t.start_tool("LINE")
         t.osnap_on = True
         t.osnap_modes = {"END"}
-        # paper (170, 100) is the model line's endpoint (5100, 3000); hover
-        # a hair off it, in paper units, as the mouse would
-        t.on_hover(170.3, 100.2, 2.0)
-        assert t.snap_hit is not None, "no snap on the model through the viewport"
-        assert (t.snap_hit.x, t.snap_hit.y) == pytest.approx((5100.0, 3000.0))
+        # (the sheet's warmer may already hold a model engine: the SHEET
+        # snaps through its viewports; that is paper-space work, kept)
+        engine_before = t.snap_engine
+        model_before = t._model_snap_engine
+        t.on_hover(170.3, 100.2, 2.0)   # paper (170, 100) = model (5100, 3000)
+        assert t.snap_hit is None
+        assert t.snap_engine is engine_before, "a snap engine was built"
+        assert t._model_snap_engine is model_before, "a model engine was built"
+        # the readout still speaks model units through the projection
+        assert t._cursor == pytest.approx((5101.5, 3001.0))
     finally:
         win.close()
 
 
-def test_the_sheets_own_commands_still_belong_to_paper_space(qapp):
+def test_every_command_is_refused_inside_a_viewport_with_the_way_out(qapp):
     win, t, vp = _window(qapp)
     try:
         _enter(qapp, win, vp)
-        t.start_tool("MOVE")
-        assert t.active(), "MOVE was refused inside a viewport"
-        t.cancel()
-        t.start_tool("MVIEW")
-        assert not t.active(), "MVIEW made a viewport from inside a viewport"
+        said = []
+        win.command_line.echo = lambda text, *a, **k: said.append(text)
+        for name in ("MOVE", "MVIEW", "ERASE", "COPY"):
+            t.start_tool(name)
+            assert not t.active(), f"{name} ran inside a viewport"
+            assert "PSPACE" in said[-1] and "Model tab" in said[-1], said[-1]
     finally:
         win.close()
 
@@ -436,61 +466,53 @@ def test_ctrl_r_cycles_the_current_viewport(qapp):
         win.close()
 
 
-def test_the_highlight_of_a_picked_model_entity_lands_inside_the_frame(qapp):
-    """The display direction, end to end: pick a model entity through the
-    viewport and the pixels its highlight would use have to fall inside the
-    viewport's own frame -- not out at the model's coordinates."""
+def test_a_double_click_on_a_model_text_inside_the_viewport_opens_nothing(qapp):
+    """The double-click's edit action belongs to the sheet's own objects;
+    a model text seen through the viewport is not edited from here."""
     win, t, vp = _window(qapp)
     try:
+        mx, my = layout_ops.paper_to_model(vp, 200.0, 120.0)   # inside the frame
+        win.document.doc.modelspace().add_mtext(
+            "DENTRO", dxfattribs={"char_height": 50, "insert": (mx, my)})
         _enter(qapp, win, vp)
-        canvas = win.viewport
-        canvas.view.zoom_extents(0, 0, 841, 594)     # the whole sheet in view
-        t._pick_tolerance = 2.0
-        t.on_click(160.0, 100.0)
-        assert t.selection
-        segs, _circles, _boxes = t.highlight_geometry()
-        assert len(segs), "no highlight geometry"
-        x0, y0, x1, y1 = layout_ops.viewport_rect(vp)
-        fx0, fy0 = canvas.view.world_to_screen(x0, y1)
-        fx1, fy1 = canvas.view.world_to_screen(x1, y0)
-        for sx, sy, ex, ey in segs[:20]:
-            for px, py in (canvas._space_to_screen(sx, sy),
-                           canvas._space_to_screen(ex, ey)):
-                assert fx0 - 1 <= px <= fx1 + 1, (px, fx0, fx1)
-                assert fy0 - 1 <= py <= fy1 + 1, (py, fy0, fy1)
+        opened = []
+        win.tools.open_text_editor_for = lambda e: opened.append(e) or True
+        win.on_canvas_double_click(200.0, 120.0)
+        assert not opened, "a model text opened its editor through the viewport"
+        assert win._active_vp is vp, "the viewport stayed current"
     finally:
         win.close()
 
 
-def test_the_in_place_text_editor_follows_the_projection(qapp):
-    """Editing a model text through a viewport: the floating editor sits
-    where the viewport DRAWS the text and is sized in its scale, not at the
-    model's own coordinates somewhere off the sheet."""
-    from views.mtext_editor import MTextInPlaceEditor
+def test_the_live_model_is_shared_by_every_sheet(qapp):
+    """One tessellation of the model serves every layout tab: keyed per
+    sheet, each tab switch rebuilt the whole model (2.3 s on a real plan)
+    for identical vertices."""
+    from views.main_window import _LiveSceneWorker
 
     win, t, vp = _window(qapp)
     try:
-        _enter(qapp, win, vp)
-        canvas = win.viewport
-        canvas.view.zoom_extents(0, 0, 841, 594)
-        editor = MTextInPlaceEditor(canvas, top_left=(5000.0, 3000.0),
-                                    width_world=50.0, char_height=2.5,
-                                    on_commit=lambda *a: None)
-        try:
-            editor._sync_geometry()
-            assert editor._scale() == pytest.approx(canvas._space_scale())
-            # the widget sits 2 px up and left of the text corner (its own
-            # border), and higher by whatever chrome the toolbar takes
-            sx, sy = canvas._space_to_screen(5000.0, 3000.0)
-            assert editor.pos().x() == pytest.approx(int(sx) - 2, abs=1)
-            assert editor.pos().y() <= sy
+        doc = win.document.doc
+        doc.layouts.new("Layout2")
+        win._refresh_layout_tabs()
+        win.switch_layout("Layout1")
+        _wait_regen(qapp, win)
+        worker = getattr(win, "_vp_live_worker", None)
+        while worker is not None and worker.isRunning():
+            qapp.processEvents()
+        qapp.processEvents()
+        scene = win._vp_model_scene_ready()
+        assert scene is not None, "no live model after the sheet's regen"
 
-            # the inverse: on the sheet it is the plain view again
-            win._deactivate_viewport()
-            editor._sync_geometry()
-            assert editor._scale() == pytest.approx(canvas.view.scale)
-        finally:
-            editor.deleteLater()
+        win.switch_layout("Layout2")
+        _wait_regen(qapp, win)
+        assert win._vp_model_scene_ready() is scene, "Layout2 rebuilt the model"
+        worker = getattr(win, "_vp_live_worker", None)
+        assert worker is None or not worker.isRunning()
+
+        # the inverse: a model edit does drop it
+        win.invalidate_vp_model_cache()
+        assert win._vp_model_cache is None
     finally:
         win.close()
 

@@ -76,10 +76,11 @@ class _CacheWarmer(QThread):
     # document, index, snap, revision, space name, model snap (sheet only)
     done = Signal(object, object, object, int, str, object)
 
-    def __init__(self, document) -> None:
+    def __init__(self, document, model_engine: bool = True) -> None:
         super().__init__()
         self.setObjectName("cache-warmer")
         self._document = document
+        self._model_engine = model_engine
 
     def run(self) -> None:
         from core import gc_guard
@@ -105,7 +106,8 @@ class _CacheWarmer(QThread):
         try:
             index._build()
             engine._build()
-            if space != "Model" and not getattr(self._document, "edit_block", None):
+            if (self._model_engine and space != "Model"
+                    and not getattr(self._document, "edit_block", None)):
                 model_engine = SnapEngine(
                     self._document, space=self._document.doc.modelspace())
                 model_engine._build()
@@ -458,7 +460,9 @@ class ToolController(QObject):
         self._refresh_overlay()
 
     def _start_warmer(self, document) -> None:
-        warmer = _CacheWarmer(document)
+        # the model engine a sheet snaps through its viewports with is kept
+        # across tab switches (see space_changed); only build it when missing
+        warmer = _CacheWarmer(document, self._model_snap_engine is None)
         warmer.done.connect(self._on_caches_warm)
         self._warmers.add(warmer)
         warmer.start()
@@ -499,6 +503,7 @@ class ToolController(QObject):
             self.snap_engine = engine
         if model_engine is not None and self._model_snap_engine is None:
             self._model_snap_engine = model_engine
+            self._model_engine_revision = revision
 
     def mark_scene_merged(self) -> None:
         """A full regen just happened: overlay entities now live in the base."""
@@ -534,13 +539,18 @@ class ToolController(QObject):
                 tr("** {name} is not allowed in the Model tab — switch to a "
                    "layout. **", name=name))
             return
-        if (in_paper and self.space_vp is not None
-                and name in LAYOUT_TOOL_CLASSES):
-            # The mirror of the rule above: a viewport is an object ON the
-            # sheet, so making one belongs to paper space (MVIEW, p. 1224).
+        if self.space_vp is not None:
+            # An active viewport is for NAVIGATING the model (wheel, pan,
+            # ZOOM nXP/E/W, VPLOCK), not for editing it: the pick index and
+            # snap engine of a real plan's whole model cost 2 s of GIL on
+            # entry and 0.4 s of frozen GUI, for a way of editing nobody
+            # uses (Marco, 2026-09-28: "no deberíamos poder editar dentro
+            # del viewport"). Drawing happens in the Model tab; the sheet's
+            # own commands (MVIEW…) want the paper, so PSPACE first.
             self.window.command_line.echo(
-                tr("** {name} works on the sheet — PSPACE first. **",
-                   name=name))
+                tr("** {name} is not available inside a viewport — pan, "
+                   "zoom and VPLOCK only. PSPACE returns to the sheet; edit "
+                   "the drawing in the Model tab. **", name=name))
             return
         if self.window.document is None:
             self.window.new_document()
@@ -1698,8 +1708,10 @@ class ToolController(QObject):
         needs_snap = grip_hot or (
             self.tool is not None and self._selecting_for is None
             and not self.tool.entity_picker)
-        if not inside:
-            needs_snap = False    # over the paper, outside the viewport
+        if not inside or self.space_vp is not None:
+            # over the paper outside the viewport, or inside one: a
+            # viewport navigates, it does not snap (see start_tool)
+            needs_snap = False
         if needs_snap and self.caches_warming():
             # The caches are being built in the background right after an
             # open. Building them here instead froze the first mouse move
@@ -2175,7 +2187,7 @@ class ToolController(QObject):
 
     def start_window(self, wx: float, wy: float) -> None:
         """Anchor a selection window (drag start). Idempotent during a drag."""
-        if not self.in_active_viewport(wx, wy):
+        if self.space_vp is not None or not self.in_active_viewport(wx, wy):
             return
         wx, wy = self.to_space(wx, wy)
         if self._window_anchor is None:
@@ -2185,6 +2197,8 @@ class ToolController(QObject):
     def on_click(self, wx: float, wy: float, shift: bool = False) -> None:
         if not self.mspace_route(wx, wy):
             return
+        if self.space_vp is not None:
+            return      # inside the active viewport a click selects nothing
         wx, wy = self.to_space(wx, wy)
         if self.in_selection_mode():
             self._selection_click(wx, wy, shift)
@@ -2363,6 +2377,7 @@ class ToolController(QObject):
                 engine = SnapEngine(self.window.document,
                                     space=self.window.document.doc.modelspace())
                 self._model_snap_engine = engine
+                self._model_engine_revision = self.window.document.revision
             anchor = self.tool.last_point if self.tool else None
             if anchor is not None:
                 anchor = layout_ops.paper_to_model(vp, *anchor)
@@ -2492,6 +2507,26 @@ class ToolController(QObject):
             self._flatten_key = key
         return self._flatten_value
 
+    def viewport_crossed(self) -> None:
+        """A viewport was entered or left (MSPACE/PSPACE).
+
+        Unlike :meth:`space_changed` this builds nothing: inside a viewport
+        nothing is picked or snapped, so the model needs no index there, and
+        the sheet's own index and snap engine stay valid for the way back.
+        Measured on Planos Constructivos: the warmer this used to start took
+        2 s of GIL and left the GUI mute for 0.4 s right after the
+        double-click. The selection goes, as AutoCAD drops it across spaces.
+        """
+        self.selection = set()
+        self.reset_pick_cycle()
+        self._window_anchor = None
+        self._crossing_rects = []
+        self._highlight_cache = None
+        self._grips_cache = None
+        self._sel_entities_cache = None
+        self._ghost_cache = None
+        self.changed.emit()
+
     def space_changed(self) -> None:
         """The current space changed under us (tab switch, MSPACE/PSPACE).
 
@@ -2506,7 +2541,16 @@ class ToolController(QObject):
         self._highlight_cache = None
         self._grips_cache = None
         self._sel_entities_cache = None
+        # The model engine a sheet snaps through its viewports with walks
+        # the whole model in Python (300-600 ms of GIL on a real plan, the
+        # GUI mute meanwhile): a tab switch changes no geometry, so it is
+        # kept as long as the drawing has not moved since it was built.
+        keep = self._model_snap_engine
+        revision = getattr(self.window.document, "revision", None)
         self._invalidate_geometry()
+        if keep is not None and revision is not None \
+                and revision == getattr(self, "_model_engine_revision", None):
+            self._model_snap_engine = keep
         # the overlay's curve tolerance follows the space by itself (the
         # space is part of _flatten's cache key); the ghost built at the old
         # one goes
