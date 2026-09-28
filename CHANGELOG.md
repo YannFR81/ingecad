@@ -65,6 +65,10 @@
   the same as panning the paper. The model for the live view is now
   prepared as soon as the sheet tab is shown, so the double-click finds
   it ready.
+- **Inside a viewport, the pointer is an arrow over the rest of the
+  sheet**, as in AutoCAD: the crosshair stays clipped to the active
+  viewport, and the ordinary arrow shows where a double-click on the paper
+  would take you back to paper space. It used to vanish out there.
 - **Lineweights inside a viewport were drawn at the paper's scale while
   navigating live**: a 0.5 mm wall in a 1:50 viewport became a black bar
   50 times too wide (Marco's video). They are now the same width live as

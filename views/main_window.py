@@ -3101,6 +3101,7 @@ class MainWindow(QMainWindow):
         self.tools.clear_selection()      # entering MSPACE deselects (AutoCAD)
         self._active_vp = vp
         self.viewport.active_vp_rect = layout_ops.viewport_rect(vp)
+        self.viewport.sync_cursor_shape()
         # Everything the mouse says is paper and everything the model
         # answers is model: the projection goes to the two layers that
         # cross it, the tool controller (points) and the canvas (matrices).
@@ -3557,6 +3558,7 @@ class MainWindow(QMainWindow):
             self.tools.space_changed()    # back to the sheet's own entities
         if getattr(self.viewport, "active_vp_rect", None) is not None:
             self.viewport.active_vp_rect = None
+            self.viewport.sync_cursor_shape()     # the crosshair, sheet-wide
             self.viewport.update()
         if echo:
             self.command_line.echo(

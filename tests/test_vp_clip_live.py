@@ -259,3 +259,46 @@ def test_a_thick_line_inside_a_viewport_is_as_wide_live_as_baked(qapp):
     finally:
         win.document.dirty = False
         win.close()
+
+
+def test_outside_the_active_viewport_the_pointer_is_an_arrow(win):
+    """AutoCAD: inside MSPACE the crosshair is clipped to the active
+    viewport, and over the rest of the sheet the pointer is the ordinary
+    arrow. IngeCAD clipped the crosshair but painted nothing else, so the
+    pointer vanished on the paper -- Marco: "cuando salgo al papel no hay
+    cursor, ¿cómo sé que estoy en el papel?". The arrow is painted into the
+    frame; the OS pointer stays blank (it flickers over GL on some setups)."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    _psp, vp = _sheet(win)
+    win.switch_layout("Layout1")
+    v = win.viewport
+    v.zoom_extents()
+    shapes = []
+    original = v.setCursor
+    v.setCursor = lambda c: (shapes.append(c.shape()), original(c))
+
+    def move(paper_xy):
+        sx, sy = v.view.world_to_screen(*paper_xy)
+        pos = QPointF(sx, sy)
+        QApplication.sendEvent(v, QMouseEvent(
+            QEvent.MouseMove, pos, v.mapToGlobal(pos), Qt.NoButton, Qt.NoButton,
+            Qt.NoModifier))
+        QApplication.processEvents()
+
+    move((30, 30))
+    assert not v._arrow_pointer                           # paper: the crosshair
+    win._activate_viewport(vp)
+    _warm(win)
+    move((150, 100))                                      # inside the viewport
+    assert not v._arrow_pointer
+    move((30, 30))                                        # out on the paper
+    assert v._arrow_pointer
+    move((150, 100))
+    assert not v._arrow_pointer
+    move((30, 30))
+    win._deactivate_viewport()                            # PSPACE: paper again
+    assert not v._arrow_pointer
+    assert shapes == [] and v.cursor().shape() == Qt.BlankCursor

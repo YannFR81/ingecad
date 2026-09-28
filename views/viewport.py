@@ -1487,6 +1487,8 @@ class Viewport(QOpenGLWidget):
             pos = self._soft_cursor_pos()
             if pos is not None:
                 self._draw_soft_cursor(p, pos)
+        elif self._cursor is not None and not self._panning and self._arrow_pointer:
+            self._draw_arrow_pointer(p, self._cursor)
         elif self._cursor is not None and not self._panning:
             self._draw_crosshair(p, self._cursor, self._cursor_mode())
             if self.tool_delegate is not None and getattr(self.tool_delegate, "dyn_on", False):
@@ -2206,6 +2208,7 @@ class Viewport(QOpenGLWidget):
         else:
             self._cursor = pos
             wx, wy = self.view.screen_to_world(pos.x(), pos.y())
+            self.sync_cursor_shape(wx, wy)
             if self.tool_delegate is not None:
                 self._grip_hover = self.tool_delegate.grip_at(wx, wy)
                 if (self._sel_press is not None
@@ -2216,6 +2219,48 @@ class Viewport(QOpenGLWidget):
                 self.tool_delegate.on_hover(wx, wy)
             self.cursorMoved.emit(wx, wy)
         self.update()
+
+    def sync_cursor_shape(self, wx: Optional[float] = None,
+                          wy: Optional[float] = None) -> None:
+        """Which pointer the frame paints: the crosshair, or an arrow over
+        the paper while a viewport is active.
+
+        AutoCAD clips the crosshair to the active viewport and shows the
+        arrow on the rest of the sheet; clipping alone left the pointer
+        invisible out there (Marco: "cuando salgo al papel no hay cursor").
+        The arrow is painted into the frame like the pan hands: the OS
+        pointer over the canvas stays blank at all times (it flickers over
+        a GL surface on some driver/compositor pairs). ``wx, wy`` is the
+        pointer in paper coordinates; without it, the last known position.
+        """
+        if wx is None:
+            if self._cursor is None:
+                self._arrow_pointer = False
+                return
+            wx, wy = self.view.screen_to_world(self._cursor.x(), self._cursor.y())
+        rect = self.active_vp_rect
+        self._arrow_pointer = (
+            rect is not None
+            and not (rect[0] <= wx <= rect[2] and rect[1] <= wy <= rect[3]))
+
+    #: The frame paints an arrow instead of the crosshair (see sync_cursor_shape).
+    _arrow_pointer: bool = False
+
+    def _draw_arrow_pointer(self, p: QPainter, pos: QPointF) -> None:
+        """The ordinary arrow, painted: tip at the pointer, light with a
+        dark edge, so it reads on the paper and on the desk alike."""
+        x, y = pos.x(), pos.y()
+        arrow = QPolygonF([QPointF(x, y), QPointF(x, y + 16), QPointF(x + 4, y + 12.5),
+                           QPointF(x + 7, y + 18.5), QPointF(x + 9.5, y + 17.5),
+                           QPointF(x + 6.5, y + 11.5), QPointF(x + 11.5, y + 11.5)])
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(25, 25, 25), 1.2)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(QColor(250, 250, 250))
+        p.drawPolygon(arrow)
+        p.restore()
 
     def mouseDoubleClickEvent(self, event) -> None:
         # AutoCAD: double-click enters/leaves a viewport on a layout tab.
