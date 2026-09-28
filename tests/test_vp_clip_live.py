@@ -324,3 +324,30 @@ def test_zoom_extents_inside_a_viewport_shows_the_new_view_at_once(win):
     assert live[0]["factor"] == pytest.approx(
         float(vp.dxf.height) / float(vp.dxf.view_height))
     assert win.viewport.space_placement["factor"] == pytest.approx(live[0]["factor"])
+
+
+def test_navigating_inside_a_viewport_re_bakes_the_sheet_only_on_leaving(win):
+    """Every wheel burst inside a viewport re-baked the whole sheet when it
+    settled -- a full parallel regen per pause, 12 in a minute of zooming
+    on a real sheet (measured), the lag Marco felt. The live matrix already
+    shows the exact view, so the bake waits until the viewport is left."""
+    _psp, vp = _sheet(win, dangling=True)
+    fired = []
+    real = win.regen_in_memory
+    win.regen_in_memory = lambda *a, **k: fired.append(1) or real(*a, **k)
+    win.switch_layout("Layout1")
+    win._activate_viewport(vp)
+    _warm(win)
+    fired.clear()
+    for _ in range(3):                                 # three bursts, each settling
+        assert win.vp_view_zoom(1.2, (100.0, 70.0)) is True
+        win._vp_gesture_commit()                       # what the 700 ms timer does
+    assert fired == []
+    assert win.viewport._live_vp is not None           # the picture stays up
+    assert win._vp_sheet_stale
+    win._on_command_submitted("Z")
+    win._on_command_submitted("E")
+    assert fired == []
+    win._deactivate_viewport()                         # PSPACE: now the sheet re-bakes
+    assert fired == [1]
+    assert not win._vp_sheet_stale

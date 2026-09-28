@@ -65,6 +65,11 @@
   the same as panning the paper. The model for the live view is now
   prepared as soon as the sheet tab is shown, so the double-click finds
   it ready.
+- **Zooming and panning inside a viewport no longer re-bakes the sheet
+  after every burst.** Each pause used to rebuild the whole sheet (a full
+  regen per pause, twelve in a minute of zooming on a real sheet) while
+  the live view already showed the right picture; the sheet is now
+  rebuilt once, when you leave the viewport.
 - **ZOOM Extents, ZOOM nXP and ZOOM Window inside a viewport show the new
   view at once** (0.3 s on a real sheet instead of 5.7 s): the fitted view
   goes up through the live matrix, like a pan, while the sheet re-bakes
@@ -77,6 +82,14 @@
   navigating live**: a 0.5 mm wall in a 1:50 viewport became a black bar
   50 times too wide (Marco's video). They are now the same width live as
   on the baked sheet.
+- **A viewport with a view target no longer draws empty.** The culling
+  that skips the model a viewport does not show centred its rectangle on
+  the raw view centre, which is relative to the view target: with a UTM
+  target the rectangle sat near the origin and the whole model was
+  skipped -- Plaza Yanque's Layout1 showed its main viewport blank, and
+  ZOOM Extents inside it "did nothing". Fixed; and ZOOM Extents in a
+  twisted viewport now fits the turned extents, so the model no longer
+  spills out of the frame.
 - **A sheet no longer loses part of a block now and then.** The viewport
   culling cached bounding boxes by object identity, and a block's content
   is drawn from temporary copies whose identity Python reuses: a later

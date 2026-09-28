@@ -590,12 +590,18 @@ def _viewport_model_rect(vp) -> Optional[tuple[float, float, float, float]]:
     A twisted viewport gets the rectangle that circumscribes its rotated
     view, which is larger than what it shows and therefore still safe.
     """
+    from core.layouts import view_centre_wcs
+
     try:
-        centre = vp.dxf.view_center_point
         height = float(vp.dxf.view_height)
         width_paper = float(vp.dxf.width)
         height_paper = float(vp.dxf.height)
-        cx, cy = float(centre[0]), float(centre[1])
+        # The WCS point at the viewport's centre -- NOT group 12/22 raw,
+        # which is relative to the view target and turned by the twist: a
+        # viewport with a UTM target read raw put the rectangle near the
+        # origin and culled the whole model, so the sheet drew it EMPTY
+        # (Plaza Yanque's Layout1, Marco 2026-09-27; v0.6.4 too).
+        cx, cy = view_centre_wcs(vp)
     except Exception:
         return None
     if not (math.isfinite(height) and height > 0.0):

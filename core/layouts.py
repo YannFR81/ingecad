@@ -292,9 +292,15 @@ class AddViewportCommand(Command):
         document.dirty = True
 
 
-def model_fit_view(document, width: float, height: float):
+def model_fit_view(document, width: float, height: float,
+                   twist_degrees: float = 0.0):
     """(view_center, view_height) that fits the whole model in a viewport
     of the given paper aspect — MVIEW's default view, like AutoCAD's Fit.
+
+    A twisted viewport shows the model turned: what has to fit is the
+    extents' box turned by the twist, which is wider (a 331° twist on
+    Plaza Yanque's sheet needed a third more height, and the plain box
+    left the model spilling out of the frame).
 
     Falls back to the origin at 1:1 when the model is empty.
     """
@@ -304,6 +310,10 @@ def model_fit_view(document, width: float, height: float):
     x0, y0, x1, y1 = ext
     cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
     mw, mh = max(x1 - x0, 1e-9), max(y1 - y0, 1e-9)
+    if twist_degrees:
+        angle = math.radians(twist_degrees)
+        cos_a, sin_a = abs(math.cos(angle)), abs(math.sin(angle))
+        mw, mh = mw * cos_a + mh * sin_a, mw * sin_a + mh * cos_a
     aspect = width / height if height > 0 else 1.0
     # both model dimensions must fit: height-limited or width-limited
     view_height = max(mh, mw / aspect) * 1.02      # small breathing margin
@@ -686,7 +696,8 @@ def view_centre_wcs(vp) -> tuple[float, float]:
     reached nothing. This is ezdxf's own transformation matrix, inverted:
     ``target + R(-twist) * view_center``.
     """
-    vcx, vcy = float(vp.dxf.view_center_point.x), float(vp.dxf.view_center_point.y)
+    centre = vp.dxf.view_center_point          # a Vec3, or a plain pair
+    vcx, vcy = float(centre[0]), float(centre[1])
     tx, ty = _target_xy(vp)
     twist = _twist_radians(vp)
     if twist:
@@ -962,7 +973,8 @@ def pan_viewport_view(vp, dx_paper: float, dy_paper: float) -> None:
 def viewport_fit_command(document, vp) -> SetViewportViewCommand:
     """ZOOM Extents inside an active viewport: fit the whole model."""
     center, view_height = model_fit_view(
-        document, float(vp.dxf.width), float(vp.dxf.height))
+        document, float(vp.dxf.width), float(vp.dxf.height),
+        viewport_twist(vp))
     return SetViewportViewCommand(vp, view_center=dcs_view_center(vp, center),
                                   view_height=view_height, name="ZOOM Extents")
 

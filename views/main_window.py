@@ -2925,6 +2925,7 @@ class MainWindow(QMainWindow):
         self.viewport.set_scene(scene)
         self.tools.mark_scene_merged()
         self._layout_scenes[layout] = (revision, scene)
+        self._vp_sheet_stale = False          # this bake IS the current view
         if layout != "Model" and getattr(self, "_vp_warm_pending", False):
             # the sheet is up: build the model for navigating its viewports
             # now, so a double-click finds it ready instead of a couple of
@@ -3543,16 +3544,33 @@ class MainWindow(QMainWindow):
             vp, view_center=now_center, view_height=now_height,
             name=tr("Viewport view"),
             old_center=old_center, old_height=old_height))
-        # The sheet has to be re-baked at the new view. The live matrix stays
-        # up until that scene lands (_on_regen_done stops it): dropping it
-        # now would leave the viewport empty for as long as the regen takes,
-        # seconds on a real plan.
-        self.regen_in_memory()
+        self._vp_sheet_moved()
+
+    def _vp_sheet_moved(self) -> None:
+        """The active viewport's view changed and the sheet's bake shows
+        the old one. While the live matrix is up it already shows the new
+        view exactly, so the re-bake waits until the viewport is left (or
+        an edit regenerates anyway): re-baking the whole sheet after every
+        wheel burst was a full parallel regen per pause -- 12 in a minute
+        of zooming on a real sheet -- and the lag Marco felt. Without the
+        live matrix (a shaped clip, a twist) the bake is the only picture,
+        so it is rebuilt now; it lands with the live matrix still up, and
+        _on_regen_done retires that -- dropping it first would leave the
+        viewport empty for as long as the regen takes."""
+        if self.viewport._live_vp is not None:
+            self._vp_sheet_stale = True
+        else:
+            self.regen_in_memory()
 
     def _deactivate_viewport(self, echo: bool = False) -> None:
         self._vp_gesture_commit()       # leaving MSPACE settles the gesture
         had = getattr(self, "_active_vp", None) is not None
         self._active_vp = None
+        if getattr(self, "_vp_sheet_stale", False):
+            # the bake still shows the view before the navigation: rebuild
+            # it now; the live matrix keeps the picture up until it lands
+            self._vp_sheet_stale = False
+            self.regen_in_memory()
         self.viewport.space_placement = None
         if had:
             self.tools.space_changed()    # back to the sheet's own entities
@@ -3763,7 +3781,7 @@ class MainWindow(QMainWindow):
         alone showed the fit 5.7 s later on a real sheet (Marco)."""
         self.refresh_space_placement()
         self._vp_live_draw()
-        self.regen_in_memory()
+        self._vp_sheet_moved()
 
     def _zoom_option(self, option: str) -> None:
         from core import layouts as layout_ops

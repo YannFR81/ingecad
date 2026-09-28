@@ -1090,9 +1090,13 @@ def test_a_pan_tick_places_the_model_by_matrix(qapp):
     assert win.viewport._scene is before           # the sheet is untouched
     assert win._regen_worker is None               # nothing left in flight
     win._vp_gesture_commit()
-    # The commit asks for the exact sheet and keeps the live picture up
-    # until it lands -- dropping it here left the viewport blank for the
-    # whole regen (tests/test_vp_gesture_display.py has the full story).
+    # The commit records the view; the live picture already shows it
+    # exactly, so the sheet is not re-baked after every burst -- that waits
+    # until the viewport is left, and the live picture stays up until the
+    # fresh sheet lands (tests/test_vp_gesture_display.py has the story).
+    assert win._regen_worker is None
+    assert win.viewport._live_vp is not None
+    win._deactivate_viewport()
     assert win._regen_worker is not None
     assert win.viewport._live_vp is not None
     t0 = time.monotonic()

@@ -150,3 +150,59 @@ def test_unknown_extents_keep_the_culling() -> None:
 
     orphan = _vp()                               # no document at all
     assert _rect_covers_model((-1, -1, 1, 1), orphan) is False
+
+
+def test_a_viewport_with_a_view_target_still_shows_the_model():
+    """Plaza Yanque's Layout1 (Marco, 2026-09-27): the viewport carries a
+    UTM view target and a small view centre RELATIVE to it. Read raw, the
+    culling rectangle sat near the origin and cut the whole model away --
+    the sheet drew the viewport empty, in v0.6.4 too. The centre is the
+    WCS one, as core.layouts.view_centre_wcs computes it."""
+    from core.document import Document
+    from core import layouts as layout_ops
+    from render.backend import _viewport_model_rect, build_scene
+
+    document = Document.new()
+    doc = document.doc
+    msp = doc.modelspace()
+    for i in range(20):
+        msp.add_line((720000 + i * 10, 8289800), (720000 + i * 10, 8289900))
+    psp = doc.layouts.get("Layout1")
+    vp = psp.add_viewport(center=(150, 100), size=(200, 120),
+                          view_center_point=(-9.6, -8.3), view_height=300)
+    vp.dxf.view_target_point = (720100, 8289850, 0)
+    vp.dxf.view_twist_angle = 331.4559528600544
+    rect = _viewport_model_rect(vp)
+    wx, wy = layout_ops.view_centre_wcs(vp)
+    assert rect[0] < wx < rect[2] and rect[1] < wy < rect[3]
+    scene = build_scene(document, "Layout1")
+    model = {e.dxf.handle for e in msp}
+    drawn = sum(n for h, runs in scene.handle_ranges.items() if h in model
+                for _kind, _first, n in runs)
+    assert drawn > 0, "the sheet drew the viewport empty"
+
+
+def test_zoom_extents_fits_a_twisted_viewport_too():
+    """The fit used the extents' plain box; turned by the twist it is
+    wider, and the model spilled out of the frame (a third over, on Plaza
+    Yanque's 331° viewport)."""
+    from core.commands import History
+    from core.document import Document
+    from core import layouts as layout_ops
+
+    document = Document.new()
+    doc = document.doc
+    msp = doc.modelspace()
+    msp.add_lwpolyline([(0, 0), (400, 0), (400, 100), (0, 100)], close=True)
+    psp = doc.layouts.get("Layout1")
+    corners = [(0, 0), (400, 0), (400, 100), (0, 100)]
+    for twist in (0.0, 45.0, 331.4559528600544):
+        vp = psp.add_viewport(center=(150, 100), size=(200, 120),
+                              view_center_point=(0, 0), view_height=50)
+        vp.dxf.view_twist_angle = twist
+        History(document).execute(layout_ops.viewport_fit_command(document, vp))
+        x0, y0, x1, y1 = layout_ops.viewport_rect(vp)
+        for x, y in corners:
+            px, py = layout_ops.model_to_paper(vp, x, y)
+            assert x0 - 1e-6 <= px <= x1 + 1e-6 and y0 - 1e-6 <= py <= y1 + 1e-6, \
+                f"twist {twist}: corner {(x, y)} lands at {(px, py)} outside {(x0, y0, x1, y1)}"

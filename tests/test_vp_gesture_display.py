@@ -80,12 +80,18 @@ def test_the_picture_survives_the_gesture_commit(qapp):
 
         win._vp_gesture_commit()
         # The moment the tester saw the blank: no live matrix, hidden copy,
-        # nothing in flight. Now the live picture stays up while the fresh
-        # sheet is built.
+        # nothing in flight. The live picture stays up -- and, since it
+        # already shows the exact view, the sheet is not re-baked after
+        # every burst any more: that waits until the viewport is left.
         assert win.viewport._live_vp is not None, (
             "the live matrix was dropped before the fresh sheet landed")
-        assert win._regen_worker is not None, "the commit asked for the regen"
+        assert win._regen_worker is None, "no re-bake while the live view is up"
+        assert win._vp_sheet_stale
 
+        win._deactivate_viewport()
+        assert win._regen_worker is not None, "leaving asked for the regen"
+        assert win.viewport._live_vp is not None, (
+            "the live matrix was dropped before the fresh sheet landed")
         _wait_regen(qapp, win)
         assert win.viewport._live_vp is None, "the fresh sheet retired it"
         assert _visible_vertices(win) == baseline, (
@@ -112,14 +118,16 @@ def test_a_gesture_that_ends_where_it_started_needs_no_regen(qapp):
 
 
 def test_a_new_burst_during_the_regen_keeps_the_live_picture(qapp):
-    """Pause 700 ms, pan again while the previous commit's regen is still
-    running: the fresh sheet must not show its copy of the model under the
-    live one, and the second commit retires the live matrix in the end."""
+    """A sheet regen lands while a burst is under way (an edit asked for
+    it, as a gesture's commit used to): the fresh sheet must not show its
+    copy of the model under the live one, and leaving the viewport
+    retires the live matrix in the end."""
     win, vp = _window_in_mspace(qapp)
     try:
         baseline = _visible_vertices(win)
         assert win.vp_view_pan(5.0, 2.0)
         win._vp_gesture_commit()
+        win.regen_in_memory()                   # what an edit does
         assert win._regen_worker is not None
         # the next burst starts before that regen lands
         assert win.vp_view_pan(3.0, 1.0)
@@ -129,6 +137,7 @@ def test_a_new_burst_during_the_regen_keeps_the_live_picture(qapp):
         assert _visible_vertices(win) < baseline, (
             "the fresh sheet's copy of the model is hidden under the live one")
         win._vp_gesture_commit()
+        win._deactivate_viewport()
         _wait_regen(qapp, win)
         assert win.viewport._live_vp is None
         assert _visible_vertices(win) == baseline
