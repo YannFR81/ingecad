@@ -21,13 +21,19 @@
   "ACI color {n}": "Color ACI {n}",
   "About IngeCAD": "Acerca de IngeCAD",
   "Add IngeCAD to the applications menu?": "¿Añadir IngeCAD al menú de aplicaciones?",
+  "Cancel": "Cancelar",
   "Cannot find file {path}.": "No se encuentra el archivo {path}.",
+  "Converting the DWG...": "Convirtiendo el DWG...",
   "Load Application": "Cargar aplicación",
   "Load Application...": "Cargar aplicación...",
+  "Loading {name}...": "Cargando {name}...",
+  "Opening {name} cancelled.": "Apertura de {name} cancelada.",
   "Python files (*.py)": "Archivos Python (*.py)",
+  "Reading the drawing...": "Leyendo el dibujo...",
   "Run Script...": "Ejecutar script...",
   "Script files (*.scr)": "Archivos de script (*.scr)",
   "Select Script File": "Seleccionar archivo de script",
+  "Writing the DXF, converting with LibreDWG and checking the result...": "Escribiendo el DXF, convirtiendo con LibreDWG y verificando el resultado...",
   "You are running IngeCAD as an AppImage. Add a launcher with its icon to your applications menu, and associate .dwg and .dxf files with it? Nothing is copied: the launcher points at this file, so keep it where it is.": "Estás ejecutando IngeCAD como AppImage. ¿Añadir un lanzador con su icono al menú de aplicaciones y asociarle los archivos .dwg y .dxf? No se copia nada: el lanzador apunta a este archivo, así que déjalo donde está.",
   "Add to menu": "Añadir al menú",
   "Not now": "Ahora no",
@@ -1488,5 +1494,6 @@
   "Select an object on the layer to be unlocked:": "Designe un objeto de la capa que se va a desbloquear:",
   "thaw all layers": "reutilizar todas las capas",
   "Thaw All Layers": "Reutilizar todas las capas",
-  "Saving {name}...": "Guardando {name}..."
+  "Saving {name}...": "Guardando {name}...",
+  "{s} s": "{s} s"
 }

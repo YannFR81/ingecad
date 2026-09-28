@@ -50,6 +50,7 @@ class _OpenWorker(QObject):
 
     done = Signal(object, object)   # Document, Scene
     failed = Signal(str)            # error text
+    phase = Signal(str)             # English source text of the phase (tr'd by the window)
 
     def __init__(self, path: Path) -> None:
         super().__init__()
@@ -62,9 +63,12 @@ class _OpenWorker(QObject):
         try:
             if self._path.suffix.lower() == ".dwg":
                 # Transparent conversion: the user never sees the temp DXF.
-                document = load_dwg(self._path)
+                self.phase.emit("Converting the DWG...")
+                document = load_dwg(self._path, progress=self.phase.emit)
             else:
+                self.phase.emit("Reading the drawing...")
                 document = Document.load(self._path)
+            self.phase.emit("Regenerating...")
             scene = build_scene(document)
         except (DocumentError, DwgBridgeError) as exc:
             self.failed.emit(str(exc))
@@ -2962,6 +2966,7 @@ class MainWindow(QMainWindow):
         coordinates go until the new scene lands."""
         self._busy_regen = True
         self._set_busy(tr("Regenerating..."))
+        self._loading_begin(tr("Regenerating..."))
         self.regen_in_memory()
 
     def _start_regen(self) -> None:
@@ -2977,6 +2982,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_busy_regen", False) and not self._regen_rerun:
             self._busy_regen = False
             self._set_busy("")
+            self._loading_end()
         if worker is not None:
             worker.wait()   # thread has emitted; joins immediately
             if scene is not None:
@@ -4470,6 +4476,31 @@ class MainWindow(QMainWindow):
             self.regen_in_memory(zoom_after=True)
         self._refresh_layout_tabs()
 
+    #: Milliseconds a wait must last before the loading window appears
+    #: (tests set 0). A small file must never flash it.
+    _loading_min_ms = 400
+
+    def _loading_begin(self, title: str, on_cancel=None) -> None:
+        """The "Loading…" window (views/loading_window.py, issue #50): file
+        name, phase, elapsed time, Cancel when the work can be abandoned."""
+        from views.loading_window import LoadingWindow
+
+        window = getattr(self, "_loading_window", None)
+        if window is None:
+            window = LoadingWindow(self)
+            self._loading_window = window
+        window.begin(title, on_cancel, min_ms=self._loading_min_ms)
+
+    def _loading_phase(self, text: str) -> None:
+        window = getattr(self, "_loading_window", None)
+        if window is not None and window.active:
+            window.phase(text)
+
+    def _loading_end(self) -> None:
+        window = getattr(self, "_loading_window", None)
+        if window is not None:
+            window.finish()
+
     def _set_busy(self, text: str) -> None:
         """Show (or clear, with "") a long operation on the coordinates line.
 
@@ -4867,6 +4898,10 @@ class MainWindow(QMainWindow):
         worker.finished.connect(loop.quit)
         self._save_worker = worker
         self.command_line.echo(tr("Saving {name}...", name=path.name))
+        self._loading_begin(tr("Saving {name}...", name=path.name))
+        if path.suffix.lower() == ".dwg":
+            self._loading_phase(tr("Writing the DXF, converting with LibreDWG "
+                                   "and checking the result..."))
         QApplication.setOverrideCursor(Qt.BusyCursor)
         try:
             worker.start()
@@ -4876,6 +4911,7 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
             self._save_worker = None
+            self._loading_end()
         if worker.error is not None:
             raise worker.error
         return worker.result
@@ -4952,12 +4988,16 @@ class MainWindow(QMainWindow):
             self.command_line.echo(tr("Still opening the previous drawing..."))
             return
         self._opening_name = path.name
+        self._open_cancelled = False
         self._set_busy(tr("Opening {name}...", name=path.name))
+        self._loading_begin(tr("Loading {name}...", name=path.name),
+                            on_cancel=self._cancel_open)
         thread = QThread(self)
         thread.setObjectName("open-drawing")
         worker = _OpenWorker(path)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
+        worker.phase.connect(lambda text: self._loading_phase(tr(text)))
         worker.done.connect(self._on_open_done)
         worker.failed.connect(self._on_open_failed)
         worker.done.connect(thread.quit)
@@ -4968,10 +5008,22 @@ class MainWindow(QMainWindow):
         self._open_worker = worker  # keep alive while the thread runs
         thread.start()
 
+    def _cancel_open(self) -> None:
+        """Cancel on the loading window: the worker cannot be stopped
+        mid-parse, so its result is abandoned when it lands."""
+        self._open_cancelled = True
+        self._set_busy("")
+        self.command_line.echo(
+            tr("Opening {name} cancelled.", name=self._opening_name))
+
     def _on_open_done(self, document: Document, scene) -> None:
         from core import recent as recent_mod
 
         self._set_busy("")
+        self._loading_end()
+        if getattr(self, "_open_cancelled", False):
+            self._open_cancelled = False
+            return
         if getattr(self, "_open_as_template", False):
             document.path = None          # a template has no file of its own
             document.dirty = True
@@ -5017,6 +5069,10 @@ class MainWindow(QMainWindow):
 
     def _on_open_failed(self, error: str) -> None:
         self._set_busy("")
+        self._loading_end()
+        if getattr(self, "_open_cancelled", False):
+            self._open_cancelled = False
+            return
         QMessageBox.warning(
             self,
             tr("Open Drawing"),

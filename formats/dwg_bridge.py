@@ -264,7 +264,7 @@ def _discard_temp_dxf(dxf_path: Path) -> None:
         shutil.rmtree(parent, ignore_errors=True)
 
 
-def load_dwg(dwg_path: Path):
+def load_dwg(dwg_path: Path, progress=None):
     """Open a DWG as a Document via LibreDWG.
 
     LibreDWG reads up to r2018. Output is validated — for some r2013+
@@ -280,6 +280,8 @@ def load_dwg(dwg_path: Path):
 
     dwg_path = Path(dwg_path)
     dxf_path = dwg_to_dxf(dwg_path)
+    if progress is not None:
+        progress("Reading the drawing...")     # the DWG is now a DXF
     try:
         document = Document.load(dxf_path)
     finally:

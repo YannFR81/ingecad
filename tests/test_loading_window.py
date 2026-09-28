@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari Tellez and IngeCAD contributors.
+"""The "Loading <name>…" window (issue #50): shown for a long open, regen or
+save, with the phase and the elapsed time; Cancel abandons an open."""
+from __future__ import annotations
+
+import time
+
+import ezdxf
+import pytest
+
+
+def _wait(qapp, win, timeout_s=30.0):
+    t0 = time.monotonic()
+    while win._open_thread is not None and time.monotonic() - t0 < timeout_s:
+        qapp.processEvents()
+    qapp.processEvents()
+
+
+def _dxf(tmp_path, name="plan.dxf"):
+    doc = ezdxf.new("R2018")
+    doc.modelspace().add_line((0, 0), (100, 50))
+    path = tmp_path / name
+    doc.saveas(path)
+    return path
+
+
+def test_the_window_appears_with_the_file_name_and_phases_then_goes(qapp, tmp_path):
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.show()
+    win._loading_min_ms = 0                    # a tiny file: show at once anyway
+    try:
+        phases = []
+        original = win._loading_phase
+
+        def spy(text):
+            phases.append(text)
+            original(text)
+
+        win._loading_phase = spy
+        win.open_path(_dxf(tmp_path))
+        window = win._loading_window
+        assert window.active and "plan.dxf" in window._title.text()
+        assert window.testAttribute(window.WA_ShowWithoutActivating
+                                    if hasattr(window, "WA_ShowWithoutActivating")
+                                    else __import__("PySide6.QtCore").QtCore.Qt.WA_ShowWithoutActivating)
+        _wait(qapp, win)
+        assert win.document is not None and win.document.path is not None
+        assert any("Reading" in p for p in phases) and any("Regenerating" in p for p in phases), phases
+        assert not window.active and not window.isVisible(), "the window stayed"
+    finally:
+        win.close()
+
+
+def test_a_small_file_never_flashes_the_window(qapp, tmp_path):
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.show()
+    try:
+        win.open_path(_dxf(tmp_path))         # default min_ms = 400
+        shown = False
+        t0 = time.monotonic()
+        while win._open_thread is not None and time.monotonic() - t0 < 30:
+            qapp.processEvents()
+            shown = shown or win._loading_window.isVisible()
+        assert not shown
+    finally:
+        win.close()
+
+
+def test_cancel_abandons_the_open(qapp, tmp_path):
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.show()
+    win._loading_min_ms = 0
+    try:
+        win.new_document()
+        before = win.document
+        said = []
+        win.command_line.echo = lambda text, *a, **k: said.append(text)
+        win.open_path(_dxf(tmp_path))
+        win._loading_window._cancel.click()      # the user gives up
+        assert not win._loading_window.active
+        _wait(qapp, win)
+        assert win.document is before, "the cancelled drawing replaced the current one"
+        assert any("cancelled" in s for s in said), said
+    finally:
+        win.document.dirty = False
+        win.close()
+
+
+def test_the_loading_window_api_is_self_contained(qapp):
+    from views.loading_window import LoadingWindow
+
+    w = LoadingWindow()
+    cancelled = []
+    w.begin("Loading x…", on_cancel=lambda: cancelled.append(1), min_ms=0)
+    assert w.isVisible() and w._cancel.isVisible()
+    w.phase("Reading…")
+    assert w._phase.text() == "Reading…"
+    assert w.elapsed_s() >= 0.0
+    w._cancel.click()
+    assert cancelled == [1] and not w.active and not w.isVisible()
+    w.begin("Regenerating…", min_ms=0)
+    assert not w._cancel.isVisible(), "no Cancel when nothing can be cancelled"
+    w.finish()
+    assert not w.isVisible()
+    w.deleteLater()
