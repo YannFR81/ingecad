@@ -682,6 +682,14 @@ class TolerantFrontend(Frontend):
     #: entity stays in the document, it is simply not drawn.
     hidden_handles: frozenset = frozenset()
 
+    #: A parallel sheet build (render.parallel): the model entities this
+    #: worker draws in every viewport, or None to draw them all ...
+    _model_share: Optional[frozenset] = None
+    #: ... and whether it also draws the sheet's own entities (one worker does)
+    _draws_paper: bool = True
+    #: Inside a viewport pass -- drawing the model through a viewport
+    _in_viewport: bool = False
+
     #: Annotation scale of the space being drawn (core.annotative): model
     #: space's CANNOSCALE, a viewport's own scale, or None on the sheet
     #: itself. _UNSET outside a layout pass (overlays): the entity's space
@@ -747,15 +755,36 @@ class TolerantFrontend(Frontend):
         self._anno_scale = (annotative.viewport_scale(vp)
                             or annotative.current_scale(vp.doc))
         self._anno_show_all = self._anno_sheet_show_all
+        inside = self._in_viewport
+        self._in_viewport = True
         try:
             super().draw_viewport(vp)
         finally:
             self._vp_rect = previous
             self._anno_scale, self._anno_show_all = saved
+            self._in_viewport = inside
+
+    def _skip_share_check(self, entity) -> bool:
+        """Only a drawing's own top-level entities are shared out: the
+        content of a block, a dimension or a leader is drawn by whoever
+        draws its owner (virtual copies carry no handle). An entity that
+        cannot even say its handle counts as one: it is drawn."""
+        try:
+            return not entity.dxf.handle
+        except Exception:                     # noqa: BLE001 - draw it
+            return True
 
     def _outside_viewport(self, entity) -> bool:
         rect = self._vp_rect
         if rect is None:
+            return False
+        if self._skip_share_check(entity):
+            # A virtual copy -- the content of a block -- is never culled:
+            # its owner was measured already, and the box cache is keyed by
+            # id(), which Python hands to the NEXT temporary copy once this
+            # one is freed. A later copy then inherited a stranger's box and
+            # vanished from the sheet at random (a window block drew 8 of
+            # its 28 line vertices in 1 regen out of 5).
             return False
         key = id(entity)
         box = self._vp_boxes.get(key, False)
@@ -906,6 +935,13 @@ class TolerantFrontend(Frontend):
         return backend.end_capture(saved)
 
     def draw_entity(self, entity, properties) -> None:
+        share = self._model_share
+        if share is not None and not self._skip_share_check(entity):
+            if self._in_viewport:
+                if entity.dxf.handle not in share:
+                    return
+            elif not self._draws_paper and entity.dxftype() != "VIEWPORT":
+                return
         substituted = False
         if entity.dxf.hasattr("handle"):
             from core import annotative
@@ -1177,8 +1213,18 @@ def build_scene(document: Document, layout_name: str | None = None, *,
         from render import parallel as _parallel
 
         parallel = _parallel.draw_parallel(make_frontend, layout)
+    elif canvas is None and layout_name is not None:
+        from render import parallel as _parallel
+
+        parallel = _parallel.draw_sheet_parallel(make_frontend, layout)
     if parallel is not None:
         backend, skipped = parallel
+        if layout_name is not None:
+            # the context the serial draw leaves behind: the sheet current,
+            # so a border in colour 7 resolves against the paper
+            context = TolerantRenderContext(document.doc)
+            context.set_current_layout(layout)
+            _draw_viewport_borders(layout, context, backend)
     else:
         frontend, backend = make_frontend()
         if canvas is not None and layout_name is None:

@@ -112,13 +112,24 @@ def draw_parallel(make_frontend, layout, *, min_cost: int = MIN_COST,
     ``make_frontend()`` builds a fresh (frontend, backend) pair, exactly as
     the serial regen does; it is called in each worker after the fork.
     """
+    return _fork_and_merge(make_frontend, layout, min_cost, processes,
+                           lambda index, share: (layout, share, None, True),
+                           per_worker=SHARES_PER_WORKER)
+
+
+def _fork_and_merge(make_frontend, model, min_cost, processes, plan,
+                    per_worker: int):
+    """Cut ``model``'s entities into runs and draw each on a forked worker.
+    ``plan(index, run)`` says what the worker draws: (layout to draw, filter
+    set for draw_layout or None, model share for the viewports or None,
+    whether it draws the sheet's own entities)."""
     if not available():
         return None
     processes = processes or workers()
     if processes < 2:
         return None
     try:
-        costs = entity_costs(layout)
+        costs = entity_costs(model)
     except Exception as exc:                  # noqa: BLE001 - serial will do
         logger.warning("parallel regen: cannot estimate costs: %s", exc)
         return None
@@ -127,13 +138,25 @@ def draw_parallel(make_frontend, layout, *, min_cost: int = MIN_COST,
     # many small runs, handed to whichever worker is free: the estimate
     # only has to be roughly right (a solid HATCH costs little, an MTEXT
     # more than it looks), and the slowest run no longer sets the pace
-    shares = split(costs, processes * SHARES_PER_WORKER)
+    shares = split(costs, processes * per_worker)
     if len(shares) < 2:
         return None
+    # the jobs stay here, inherited by the fork; only their NUMBER travels to
+    # a worker -- a job holding the layout pickled the whole drawing, 0.65 s
+    # per job, and the worker drew a copy instead of what it inherited
+    jobs = [plan(index, share) for index, share in enumerate(shares)]
 
-    def work(share):
+    def work(number):
+        layout, only, model_share, paper = jobs[number]
+        if model_share is not None:
+            _viewports_see_only(model_share)
         frontend, backend = make_frontend()
-        frontend.draw_layout(layout, filter_func=lambda e: e.dxf.handle in share)
+        frontend._model_share = model_share
+        frontend._draws_paper = paper
+        if only is not None:
+            frontend.draw_layout(layout, filter_func=lambda e: e.dxf.handle in only)
+        else:
+            frontend.draw_layout(layout)
         return backend.buckets, backend.images, backend.background, list(frontend.skipped)
 
     import multiprocessing
@@ -150,11 +173,12 @@ def draw_parallel(make_frontend, layout, *, min_cost: int = MIN_COST,
             # a stuck one at the timeout
             warnings.simplefilter("ignore", DeprecationWarning)
             pool = ProcessPoolExecutor(
-                max_workers=min(processes, len(shares)),
+                max_workers=min(processes, len(jobs)),
                 mp_context=multiprocessing.get_context("fork"))
             try:
                 # the children fork on the first submit, inside this filter
-                parts = list(pool.map(_run_share, shares, timeout=TIMEOUT_S))
+                parts = list(pool.map(_run_share, range(len(jobs)),
+                                      timeout=TIMEOUT_S))
             finally:
                 for process in list(getattr(pool, "_processes", {}).values()):
                     process.kill()    # a stuck child must not outlive the regen
@@ -168,10 +192,49 @@ def draw_parallel(make_frontend, layout, *, min_cost: int = MIN_COST,
     return _merge(make_frontend()[1], parts)
 
 
+def _viewports_see_only(share) -> None:
+    """In a worker: every viewport pass looks at this worker's model
+    entities only. ezdxf computes a bounding box for EVERY model entity
+    before drawing a viewport (filter_vp_entities fills its cache from the
+    whole model space); per worker that was the whole model again, and a
+    parallel sheet came out ten times slower than a serial one. The worker
+    is a process of its own: patching the module touches no one else."""
+    from ezdxf.addons.drawing import pipeline
+
+    # a worker may take several jobs: always wrap ezdxf's own function,
+    # never the previous job's wrapper (that filtered by BOTH shares, and
+    # entities went missing at random)
+    original = getattr(pipeline, "_ingecad_filter_vp_entities",
+                       pipeline.filter_vp_entities)
+    pipeline._ingecad_filter_vp_entities = original
+
+    def filtered(msp, limits, bbox_cache=None):
+        mine = [e for e in msp if e.dxf.handle in share]
+        return original(mine, limits, bbox_cache)
+
+    pipeline.filter_vp_entities = filtered
+
+
+def draw_sheet_parallel(make_frontend, layout, *, min_cost: int = MIN_COST,
+                        processes: Optional[int] = None):
+    """A sheet on several processes: every worker draws the whole sheet
+    through the same draw_layout, but in each viewport only ITS runs of the
+    model, and only the first also draws the sheet's own entities. The
+    viewports clip in ezdxf's pipeline as always. (merged backend,
+    skipped notes) or None, as :func:`draw_parallel`."""
+    doc = layout.doc
+    if not any(e.dxftype() == "VIEWPORT" for e in layout):
+        return None
+    # one run per worker: each run pays for setting up every viewport
+    return _fork_and_merge(make_frontend, doc.modelspace(), min_cost, processes,
+                           lambda index, share: (layout, None, share, index == 0),
+                           per_worker=1)
+
+
 _WORK = None
 
 
-def _run_share(share):
+def _run_share(job):
     # The fork copied every object of the window, Qt wrappers included. A
     # garbage collection here would run their destructors outside Qt's
     # thread -- the crash core/gc_guard exists for. The child lives for
@@ -179,7 +242,7 @@ def _run_share(share):
     import gc
 
     gc.disable()
-    return _WORK(share)
+    return _WORK(job)
 
 
 def _merge(backend, parts):

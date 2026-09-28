@@ -23,6 +23,7 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="fork-based: Linux only")
 
 _REAL = parallel.draw_parallel
+_REAL_SHEET = parallel.draw_sheet_parallel
 
 
 def _drawing() -> Document:
@@ -173,3 +174,100 @@ def test_the_window_regenerates_in_parallel_from_its_worker_thread(qapp, monkeyp
     finally:
         win.document.dirty = False
         win.close()
+
+
+# -- sheets ----------------------------------------------------------------------
+def _sheet_drawing():
+    document = _drawing()
+    doc = document.doc
+    doc.layers.add("MARCOS", color=7)       # colour 7: black on the paper
+    sheet = doc.layouts.new("A1")
+    sheet.add_line((0, 0), (420, 0))                              # the sheet's own
+    sheet.add_text("ROTULO", dxfattribs={"insert": (10, 10), "height": 5})
+    for i, (center, size) in enumerate((((50, 20), 40), ((300, 60), 90))):
+        sheet.add_viewport(center=(120 + i * 180, 150), size=(160, 120),
+                           view_center_point=center, view_height=size,
+                           dxfattribs={"layer": "MARCOS"})
+    return document
+
+
+def _canonical(batch, per):
+    """Primitives as rows -- positions AND colours -- in a canonical order:
+    within a same-colour group the order is not seen, the colour is."""
+    data = batch.data
+    if not len(data):
+        return np.zeros((0, per * 6))
+    rows = np.concatenate([data["pos"].astype(np.float64),
+                           data["rgba"].astype(np.float64)], axis=1).reshape(-1, per * 6)
+    return rows[np.lexsort(np.round(rows, 5).T[::-1])]
+
+
+def test_a_sheet_draws_the_same_on_several_cores(monkeypatch):
+    """Every worker draws the whole sheet through the same draw_layout,
+    in each viewport only its runs of the model, and one of them the
+    sheet's own entities; the viewports clip in ezdxf as always."""
+    document = _sheet_drawing()
+    monkeypatch.setattr(parallel, "MIN_COST", 0)
+    used = []
+
+    def spy(*a, **k):
+        k["min_cost"] = 0
+        result = _REAL_SHEET(*a, **k)
+        used.append(result is not None)
+        return result
+
+    monkeypatch.setattr(parallel, "draw_sheet_parallel", spy)
+    monkeypatch.setenv("INGECAD_SERIAL_REGEN", "1")
+    serial = backend.build_scene(document, "A1")
+    monkeypatch.setenv("INGECAD_SERIAL_REGEN", "")
+    fast = backend.build_scene(document, "A1")
+    assert used == [False, True]
+    for name, per in (("lines", 2), ("triangles", 3), ("points", 1)):
+        a, b = getattr(serial, name), getattr(fast, name)
+        assert a.vertex_count == b.vertex_count, name
+        assert np.allclose(_canonical(a, per), _canonical(b, per), atol=1e-6), name
+    assert set(serial.handle_ranges) == set(fast.handle_ranges)
+    borders = [e.dxf.handle for e in document.doc.layouts.get("A1")
+               if e.dxftype() == "VIEWPORT"]
+    assert any(h in fast.handle_ranges for h in borders)      # frames drawn
+
+
+def test_a_worker_is_told_a_number_never_sent_the_drawing(monkeypatch):
+    """A job that carried the layout pickled the whole drawing to every
+    worker (0.65 s each, and the worker drew a copy): a parallel sheet was
+    ten times slower than a serial one. Nothing of the drawing may travel."""
+    from ezdxf.document import Drawing
+
+    def refuse(self, *a):
+        raise AssertionError("the drawing was pickled for a worker")
+
+    monkeypatch.setattr(Drawing, "__reduce_ex__", refuse, raising=False)
+    document = _sheet_drawing()
+    frontends = []
+
+    def make():
+        from core.draworder import order_groups
+
+        layout = document.doc.layouts.get("A1")
+        be = backend.VertexBackend(1.0, order_groups(layout))
+        fe = backend.TolerantFrontend(backend.TolerantRenderContext(document.doc), be,
+                                      backend.frontend_config(1.0))
+        frontends.append(fe)
+        return fe, be
+
+    layout = document.doc.layouts.get("A1")
+    assert _REAL_SHEET(make, layout, min_cost=0, processes=2) is not None
+    assert _REAL(make, document.modelspace(), min_cost=0, processes=2) is not None
+
+
+def test_a_sheet_draws_every_block_every_time(monkeypatch):
+    """The viewport culling cached boxes by id(): a block's content is
+    made of temporary copies, and Python gives a freed copy's id to the
+    next one, which then inherited a stranger's box and was culled -- 8
+    sheet regens in 50 lost part of a block, serially too (v0.6.4). Only
+    the drawing's own entities are culled now."""
+    document = _sheet_drawing()
+    monkeypatch.setenv("INGECAD_SERIAL_REGEN", "1")
+    seen = {(s.lines.vertex_count, s.triangles.vertex_count)
+            for s in (backend.build_scene(document, "A1") for _ in range(25))}
+    assert len(seen) == 1, seen

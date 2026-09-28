@@ -31,8 +31,10 @@
   very same drawing path, and stitched back in order. Plaza Yanque (10 000
   objects): 4.2 s → 1.2 s, pixels identical within the serial noise. A
   worker that dies or hangs costs a serial regen, never the drawing;
-  `INGECAD_SERIAL_REGEN=1` turns it off. Sheets, Windows and macOS keep
-  the serial path.
+  `INGECAD_SERIAL_REGEN=1` turns it off. Windows and macOS keep the
+  serial path. Sheets too: every worker draws the whole sheet, in each
+  viewport only its share of the model. Planos Constructivos' sheets
+  3.8 → 1.7 s and 2.7 → 1.3 s; Casa Peregrinos' 1.5 → 0.45 s.
 - **A block placed many times is drawn once** (#29). ezdxf exploded a block
   again for every reference; now, per regen of the model, each block is
   recorded once and every reference replays it rotated and moved. Casa
@@ -50,6 +52,11 @@
   pyproj (≈34 MB) now ships in every package; `--check` proves it converts.
 
 ### Fixes
+- **A sheet no longer loses part of a block now and then.** The viewport
+  culling cached bounding boxes by object identity, and a block's content
+  is drawn from temporary copies whose identity Python reuses: a later
+  copy inherited a stranger's box and was culled. Measured: 8 sheet
+  regens in 50 drew a window block incomplete, in v0.6.4 too.
 - **Ctrl+S on a big plan no longer freezes the window.** Save as DWG ran on
   the interface thread: on Plaza Yanque (10 000 objects) the window froze
   for 10 s. The save now runs in the background while the window keeps
