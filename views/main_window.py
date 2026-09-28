@@ -1861,6 +1861,7 @@ class MainWindow(QMainWindow):
                 QShortcut(QKeySequence(fkey), self,
                           lambda k=key: self._toggle_mode(k))
         self._build_annotation_controls(style)
+        self._build_statusbar_customization(style)
         self._load_osnap_modes()
         self._load_display_settings()
         self._build_acad_shortcuts()
@@ -2245,6 +2246,93 @@ class MainWindow(QMainWindow):
         if key == "lwt":
             return self.viewport.lwt_on
         return getattr(self.tools, f"{key}_on")
+
+    # -- status bar customization (AutoCAD's right-click / Customization) -------
+    #: What the status bar shows out of the box: the classic drafting
+    #: toggles and the space button. The rest is one right-click away, and
+    #: its F-key works either way (F11 still toggles tracking, and says so
+    #: on the command line).
+    SETTING_STATUSBAR_HIDDEN = "ui/statusbar_hidden"
+    _STATUSBAR_HIDDEN_DEFAULT = ("otrack", "dyn", "lwt", "annovis",
+                                 "annoauto", "version")
+
+    def _statusbar_items(self) -> list:
+        """(key, menu label, widgets) of everything that can be hidden,
+        in the order they sit on the bar."""
+        items = [("coords", tr("Coordinates"), [self._coords_label]),
+                 ("version", tr("IngeCAD version"), [self._version_label]),
+                 ("space", tr("Model/Paper space"), [self._space_btn])]
+        for key, fkey, _label, tip in self._MODES:
+            widgets = [self._mode_buttons[key]]
+            if key == "osnap":
+                widgets.append(self._osnap_arrow)
+            items.append((key, tr(tip) + (f" ({fkey})" if fkey else ""), widgets))
+        items += [("annovis", tr("Annotation visibility"), [self._anno_visible_btn]),
+                  ("annoauto", tr("Annotation autoscale"), [self._anno_auto_btn]),
+                  ("annoscale", tr("Annotation scale"), [self._anno_scale_combo])]
+        return items
+
+    def _statusbar_hidden(self) -> set:
+        from PySide6.QtCore import QSettings
+
+        value = QSettings().value(self.SETTING_STATUSBAR_HIDDEN, None)
+        if value is None:
+            return set(self._STATUSBAR_HIDDEN_DEFAULT)
+        if isinstance(value, str):
+            return {v for v in value.split(",") if v}
+        return {str(v) for v in value if v}
+
+    def _set_statusbar_hidden(self, hidden: set) -> None:
+        from PySide6.QtCore import QSettings
+
+        QSettings().setValue(self.SETTING_STATUSBAR_HIDDEN,
+                             ",".join(sorted(hidden)))
+        self._apply_statusbar_visibility()
+
+    def _apply_statusbar_visibility(self) -> None:
+        hidden = self._statusbar_hidden()
+        for key, _label, widgets in self._statusbar_items():
+            for w in widgets:
+                w.setVisible(key not in hidden)
+
+    def _statusbar_menu(self, global_pos=None) -> None:
+        """Right-click on the status bar, or its ≡ button: tick what
+        the bar shows, as AutoCAD's and BricsCAD's status bar menus do."""
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        hidden = self._statusbar_hidden()
+        for key, label, _widgets in self._statusbar_items():
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(key not in hidden)
+            action.toggled.connect(
+                lambda on, k=key: self._set_statusbar_hidden(
+                    (self._statusbar_hidden() - {k}) if on
+                    else (self._statusbar_hidden() | {k})))
+        menu.addSeparator()
+        menu.addAction(tr("Show all"), lambda: self._set_statusbar_hidden(set()))
+        menu.addAction(tr("Restore defaults"), lambda: self._set_statusbar_hidden(
+            set(self._STATUSBAR_HIDDEN_DEFAULT)))
+        menu.exec(global_pos or QCursor.pos())
+
+    def _build_statusbar_customization(self, style: str) -> None:
+        from PySide6.QtWidgets import QToolButton
+
+        self._statusbar_custom_btn = QToolButton(self)
+        self._statusbar_custom_btn.setText("≡")
+        self._statusbar_custom_btn.setStyleSheet(style)
+        self._statusbar_custom_btn.setFocusPolicy(Qt.NoFocus)
+        self._statusbar_custom_btn.setToolTip(tr("Customize the status bar"))
+        self._statusbar_custom_btn.clicked.connect(
+            lambda _=False: self._statusbar_menu())
+        self.statusBar().addPermanentWidget(self._statusbar_custom_btn)
+        bar = self.statusBar()
+        bar.setContextMenuPolicy(Qt.CustomContextMenu)
+        bar.customContextMenuRequested.connect(
+            lambda pos: self._statusbar_menu(bar.mapToGlobal(pos)))
+        self._apply_statusbar_visibility()
 
     def _toggle_mode(self, which: str) -> None:
         if which == "grid":
@@ -4757,7 +4845,8 @@ class MainWindow(QMainWindow):
         self._coords_label = QLabel("0.0000, 0.0000")
         self._coords_label.setMinimumWidth(220)
         self.statusBar().addWidget(self._coords_label)
-        self.statusBar().addPermanentWidget(QLabel(f"IngeCAD {__version__}"))
+        self._version_label = QLabel(f"IngeCAD {__version__}")
+        self.statusBar().addPermanentWidget(self._version_label)
         self._refresh_layout_tabs()
 
     _TAB_STYLE = """
@@ -4790,6 +4879,9 @@ class MainWindow(QMainWindow):
             b.setCheckable(True)
             b.setChecked(name == self._active_layout)
             b.setStyleSheet(self._TAB_STYLE)
+            # never narrower than its name: a crowded status bar squeezed the
+            # first tab down to an elided "..." (Marco's screenshot)
+            b.setMinimumWidth(b.sizeHint().width())
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(lambda _=False, n=name: self.switch_layout(n))
             b.setContextMenuPolicy(Qt.CustomContextMenu)
