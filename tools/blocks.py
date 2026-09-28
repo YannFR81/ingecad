@@ -54,6 +54,12 @@ class InsertTool(Tool):
         self._xscale = 1.0
         self._rotation = 0.0
         self._await: str | None = None
+        self._point = None
+        self._attdefs = []
+        self._values = {}
+        self._queue = []
+        self._verify_pass = False
+        self._text_state = False
         names = self.ctx.services.block_names() if self.ctx.services else []
         if not names:
             self.ctx.echo(tr("No blocks defined."))
@@ -70,6 +76,18 @@ class InsertTool(Tool):
         # The resolver first: it turns the localized keyword, or
         # AutoCAD's _global form, into the English key the
         # branches below have always compared against.
+        if self._text_state:
+            # an attribute value: Enter keeps the default shown
+            from core import attributes as att
+
+            attdef = self._queue.pop(0)
+            tag = str(attdef.dxf.tag)
+            if text != "":
+                self._values[tag] = text
+            elif tag not in self._values:
+                self._values[tag] = att.default_of(attdef)
+            self._ask_next()
+            return True
         t = self.option(text) or text.strip().upper()
         if self._await is None and t in ("S", "SCALE"):
             self._await = "scale"
@@ -94,10 +112,117 @@ class InsertTool(Tool):
         return False
 
     def on_point(self, point: Point) -> None:
-        if self._block_name:
-            self.ctx.execute(actions.insert_block(
-                self._block_name, point, self._xscale, self._xscale,
-                self._rotation))
+        if self._await is not None:
+            return                    # a scale/rotation answer is pending
+        if not self._block_name:
+            self.ctx.finish()
+            return
+        if self._point is None:
+            self._point = point
+            if self._begin_attributes():
+                return                # the values come first (AutoCAD)
+        self._insert()
+
+    # -- attribute values ------------------------------------------------------
+    # AutoCAD asks for every non-constant attribute of the block right after
+    # the insertion point: on the command line ("Enter attribute values",
+    # each definition's prompt with its default) when ATTDIA is 0, in the Edit
+    # Attributes dialog when it is 1; ATTREQ 0 takes every default; a Preset
+    # definition never asks; a Verify definition is asked twice.
+    _point = None
+    _attdefs: list = []
+    _values: dict = {}
+    _queue: list = []
+    _verify_pass = False
+    _text_state = False
+
+    def _document(self):
+        services = self.ctx.services
+        window = getattr(services, "window", None) if services else None
+        return getattr(window, "document", None) or \
+            getattr(services, "document", None)
+
+    def _begin_attributes(self) -> bool:
+        from core import attributes as att
+        from tools.attributes import AttDiaTool, AttReqTool
+
+        document = self._document()
+        if document is None:
+            return False
+        self._attdefs = att.prompted_attdefs(document.doc, self._block_name)
+        self._values = {}
+        if not self._attdefs or AttReqTool.value() == 0:
+            return False
+        asked = [a for a in self._attdefs if not a.is_preset]
+        for a in self._attdefs:
+            if a.is_preset:
+                self._values[str(a.dxf.tag)] = att.default_of(a)
+        if not asked:
+            return False
+        if AttDiaTool.value() == 1:
+            window = getattr(self.ctx.services, "window", None)
+            if window is not None:
+                from views import attribute_dialogs
+
+                dialog = attribute_dialogs.InsertAttributesDialog(
+                    window, self._block_name, asked)
+                if not dialog.exec():
+                    self.ctx.echo(tr("*Cancel*"))
+                    self.ctx.finish()
+                    return True
+                self._values.update(dialog.values())
+                return False
+        self.ctx.echo(tr("Enter attribute values"))
+        self._queue = list(asked)
+        self._verify_pass = False
+        self._ask_next()
+        return True
+
+    def _ask_next(self) -> None:
+        from core import attributes as att
+
+        if not self._queue:
+            if not self._verify_pass:
+                verify = [a for a in self._attdefs if a.is_verify]
+                if verify:
+                    self._verify_pass = True
+                    self.ctx.echo(tr("Verify attribute values"))
+                    self._queue = verify
+                    self._ask_next()
+                    return
+            self._text_state = False
+            self.entity_picker = False
+            self._insert()
+            return
+        attdef = self._queue[0]
+        tag = str(attdef.dxf.tag)
+        default = self._values.get(tag, att.default_of(attdef))
+        self._text_state = True
+        self.entity_picker = True     # no osnap keyword read out of a value
+        self.prompt("{prompt} <{default}>:", prompt=att.prompt_of(attdef),
+                    default=default)
+
+    def wants_raw_text(self) -> bool:
+        return bool(self._text_state)
+
+    def on_enter(self) -> None:
+        if self._text_state:
+            self.on_option("")
+            return
+        self.ctx.finish()
+
+    def _insert(self) -> None:
+        from core import attributes as att
+
+        if self._attdefs:
+            command = att.insert_block_with_attribs(
+                self._block_name, self._point, self._xscale, self._xscale,
+                self._rotation, self._values)
+        else:
+            command = actions.insert_block(
+                self._block_name, self._point, self._xscale, self._xscale,
+                self._rotation)
+        self.ctx.execute(command)
         self.ctx.finish()
 
 

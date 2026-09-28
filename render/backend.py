@@ -683,6 +683,50 @@ class TolerantFrontend(Frontend):
         # (white-box masks). See draw_mleader_entity.
         self._dispatch["MULTILEADER"] = self.draw_mleader_entity
         self._dispatch["MLEADER"] = self.draw_mleader_entity
+        # ATTDISP ($ATTMODE): OFF hides every attribute, ON shows the
+        # Invisible ones too; ezdxf alone only knows the entity's own flag.
+        self._attmode = 1
+        self.push_property_override_function(self._attmode_override)
+
+    def _attmode_override(self, entity, properties) -> None:
+        if entity.dxftype() in ("ATTRIB", "ATTDEF"):
+            from core.attributes import attribute_visible
+
+            properties.is_visible = attribute_visible(entity, self._attmode)
+
+    def _draw_constant_attdefs(self, insert, properties) -> None:
+        """A Constant attribute has no ATTRIB: the reference shows the
+        definition itself, placed by the reference's matrix (AutoCAD). ezdxf
+        skips ATTDEFs when it explodes a block, so they are drawn here, owned
+        by the reference like its attributes."""
+        if insert.dxftype() != "INSERT":
+            return
+        block = insert.block()
+        if block is None:
+            return
+        consts = [a for a in block.attdefs() if a.is_const]
+        if not consts:
+            return
+        try:
+            from ezdxf.entities.attrib import copy_attrib_as_text
+
+            matrix = insert.matrix44()
+            copies = []
+            for attdef in consts:
+                # as TEXT: ezdxf draws an ATTDEF with its TAG (what a block
+                # definition shows), the reference shows the VALUE
+                copy = copy_attrib_as_text(attdef)
+                copy.transform(matrix)
+                copies.append(copy)
+        except Exception as exc:              # noqa: BLE001 - a bad matrix
+            logger.warning("constant attributes of #%s: %s",
+                           insert.dxf.get("handle", "?"), exc)
+            return
+        self.ctx.push_state(properties)
+        try:
+            self.draw_entities(copies)
+        finally:
+            self.ctx.pop_state()
 
     #: Handles hidden by ISOLATEOBJECTS/HIDEOBJECTS. Display only: the
     #: entity stays in the document, it is simply not drawn.
@@ -712,6 +756,9 @@ class TolerantFrontend(Frontend):
 
         saved = (self._anno_scale, self._anno_show_all,
                  self._anno_sheet_show_all)
+        from core.attributes import attmode
+
+        self._attmode = attmode(layout.doc)
         if layout.is_modelspace:
             self._anno_scale = annotative.current_scale(layout.doc)
             self._anno_show_all = annotative.all_visible(layout)
@@ -878,13 +925,17 @@ class TolerantFrontend(Frontend):
         cache = self._block_cache
         key = self._instance_key(entity, properties) if cache is not None else None
         if key is None:
-            return super().draw_composite_entity(entity, properties)
+            super().draw_composite_entity(entity, properties)
+            self._draw_constant_attdefs(entity, properties)
+            return
         backend = self.pipeline.backend
         recording = cache.get(key, _UNSEEN)
         if recording is _UNSEEN:
             recording = cache[key] = self._record_block(entity, properties, backend)
         if recording is None:
-            return super().draw_composite_entity(entity, properties)
+            super().draw_composite_entity(entity, properties)
+            self._draw_constant_attdefs(entity, properties)
+            return
         angle = math.radians(entity.dxf.get("rotation", 0.0))
         at = entity.dxf.insert
         backend.replay(recording, math.cos(angle), math.sin(angle), at.x, at.y)
@@ -894,6 +945,7 @@ class TolerantFrontend(Frontend):
                 self.draw_entities(entity.attribs)
             finally:
                 self.ctx.pop_state()
+        self._draw_constant_attdefs(entity, properties)
 
     def _instance_key(self, entity, properties):
         """What a recording depends on, or None when this reference cannot

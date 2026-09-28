@@ -1213,6 +1213,7 @@ class MainWindow(QMainWindow):
         insert_menu = menu_bar.addMenu(tr("Insert"))
         cmd_item(insert_menu, tr("Block..."), "INSERT")
         cmd_item(insert_menu, tr("Create Block..."), "BLOCK")
+        cmd_item(insert_menu, tr("Define Attributes..."), "ATTDEF", icon=False)
         insert_menu.addSeparator()
         # Classic AutoCAD: Insert > Raster Image Reference.
         cmd_item(insert_menu, tr("Raster Image Reference..."), "IMAGEATTACH",
@@ -1349,6 +1350,14 @@ class MainWindow(QMainWindow):
         # AutoCAD: Modify > Object > Text > Scale
         text_menu = object_menu.addMenu(tr("Text"))
         cmd_item(text_menu, tr("Scale"), "SCALETEXT", icon=False)
+        # AutoCAD: Modify > Object > Attribute > {Single, Global, Block
+        # Attribute Manager}; Synchronize is BATTMAN's Sync as a command.
+        attribute_menu = object_menu.addMenu(tr("Attribute"))
+        cmd_item(attribute_menu, tr("Single..."), "EATTEDIT", icon=False)
+        cmd_item(attribute_menu, tr("Global"), "-ATTEDIT", icon=False)
+        cmd_item(attribute_menu, tr("Block Attribute Manager..."), "BATTMAN",
+                 icon=False)
+        cmd_item(attribute_menu, tr("Synchronize"), "ATTSYNC", icon=False)
         cmd_item(modify_menu, tr("Explode"), "EXPLODE")
 
         # -- Tools ------------------------------------------------------------
@@ -3137,6 +3146,13 @@ class MainWindow(QMainWindow):
                      "SCALETEXT"):
             d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         d.register("ADJUST", lambda *a: self.tools.start_tool("IMAGEADJUST"))
+        # Block attributes (#35): ATTDEF, -ATTDEF, EATTEDIT, -ATTEDIT, ATTSYNC,
+        # ATTDISP, ATTDIA, ATTREQ as tools; BATTMAN is a dialog.
+        from tools.attributes import ATTRIBUTE_TOOL_CLASSES
+
+        for name in ATTRIBUTE_TOOL_CLASSES:
+            d.register(name, lambda *a, n=name: self.tools.start_tool(n))
+        d.register("BATTMAN", lambda *a: self._cmd_battman())
         d.register("CLEANSCREENON", lambda *a: self._clean_screen(True))
         d.register("CLEANSCREENOFF", lambda *a: self._clean_screen(False))
         d.register("LAYON", lambda *a: self._cmd_layon())
@@ -3762,6 +3778,11 @@ class MainWindow(QMainWindow):
         if self._active_vp is None:
             entity = self.tools.pick_entity((wx, wy))
         if entity is not None and entity.dxftype() != "VIEWPORT":
+            # A block reference with attributes opens the Enhanced Attribute
+            # Editor (EATTEDIT, p. 715) -- before any text rule, because the
+            # pick lands on the reference, never on one of its attributes.
+            if self.tools.edit_attributes(entity):
+                return
             if self.tools.open_text_editor_for(entity):
                 return
             # A hatch's double-click action is HATCHEDIT, the same rule that
@@ -3776,6 +3797,14 @@ class MainWindow(QMainWindow):
             self._activate_viewport(vp)
         else:
             self._deactivate_viewport(echo=True)
+
+    def _cmd_battman(self) -> None:
+        """BATTMAN (p. 203): the Block Attribute Manager."""
+        from views.battman_dialog import open_battman
+
+        if self.document is None:
+            return
+        open_battman(self)
 
     def _cmd_pagesetup(self, *args) -> None:
         """PAGESETUP: paper/orientation/margins of the current layout tab."""

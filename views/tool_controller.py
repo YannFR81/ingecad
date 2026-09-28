@@ -22,6 +22,7 @@ from core.select import GeometryIndex, apply_grip_edit, entity_grips
 from core.snap import SnapEngine, SnapHit
 from render.backend import (_flatten_distance, build_scene_for_entities,
                             curve_quality)
+from tools.attributes import ATTRIBUTE_TOOL_CLASSES
 from tools.base import Tool, ToolContext
 from tools.blocks import BLOCK_TOOL_CLASSES
 from tools.cleanup_tools import CLEANUP_TOOL_CLASSES
@@ -157,6 +158,7 @@ ALL_TOOL_CLASSES = {**TOOL_CLASSES, **EDIT_TOOL_CLASSES, **BLOCK_TOOL_CLASSES,
                     **DIM_TOOL_CLASSES, **LAYOUT_TOOL_CLASSES, **LEADER_TOOL_CLASSES,
                     **CONSTRUCT_TOOL_CLASSES, **INQUIRY_TOOL_CLASSES,
                     **MODIFY_TOOL_CLASSES, **CLEANUP_TOOL_CLASSES,
+                    **ATTRIBUTE_TOOL_CLASSES,
                     **LENGTHEN_TOOL_CLASSES, **ALIGN_TOOL_CLASSES,
                     **BOUNDARY_TOOL_CLASSES, **DONUT_TOOL_CLASSES,
                     **SCALETEXT_TOOL_CLASSES}
@@ -935,6 +937,19 @@ class ToolController(QObject):
         self.window.command_line.echo(
             tr("Hatch pattern {name}.", name=after.get("pattern", "SOLID")))
         return True
+
+    def edit_attributes(self, entity) -> bool:
+        """Double-click on a block reference with attributes: the Enhanced
+        Attribute Editor (EATTEDIT, p. 715). True if handled."""
+        if entity.dxftype() != "INSERT" or not entity.attribs:
+            return False
+        from tools.attributes import edit_attributes_of
+        from tools.base import Tool, ToolContext
+
+        ctx = ToolContext(execute=self._execute, prompt=lambda *_a: None,
+                          echo=self.window.command_line.echo,
+                          finish=lambda: None, services=self)
+        return edit_attributes_of(Tool(ctx), entity)
 
     def open_text_editor_for(self, entity) -> bool:
         """Double-click on a text object: edit it in place. True if handled.
