@@ -14,7 +14,10 @@
   fills it in, and in the sidebar it took the room the values need.
   Right-click the column headers to bring it back; the choice is kept.
 - **A new PAN icon** (#32): AutoCAD's open hand in outline, like the rest
-  of the toolbar, instead of a box with four lines.
+  of the toolbar, instead of a box with four lines. The cursor while
+  panning is the same hand -- open to hover, a fist while dragging -- with
+  a light outline over a dark fill, so it reads on the dark model, the
+  white sheet and a satellite image alike.
 - **LAYFRZ, LAYTHW, LAYLCK, LAYULK** (#40), with AutoCAD's prompts and in
   Format ▸ Layer Tools: freeze the layer of each object you pick (Undo
   takes back the last one; the current layer is refused), thaw every

@@ -62,6 +62,9 @@ SHADER_DIR = app_root() / "resources" / "shaders"
 
 # Classic dark model space (near-black, slightly blue like AutoCAD's default).
 BACKGROUND = (0.129, 0.149, 0.169)
+#: The hand cursor of PAN: light outline, dark fill (Marco's pick, 2026-09-27).
+HAND_INK = QColor(240, 244, 246)
+HAND_FILL = QColor(40, 44, 52, 230)
 AXIS_LEN = 1.0e6  # world units; clipped by GL, cheap to keep "infinite"
 CROSSHAIR_COLOR = QColor(215, 215, 215, 210)        # over the dark canvas
 CROSSHAIR_COLOR_LIGHT = QColor(40, 40, 40, 210)     # over paper-white layouts
@@ -1886,23 +1889,13 @@ class Viewport(QOpenGLWidget):
             p.drawLine(QPointF(x, y - 10), QPointF(x, y + 10))
             p.restore()
             return
-        # a hand: a palm with four fingers and a thumb, open (fingers up)
-        # or closed (curled onto the palm), about the size of the OS one
-        outline = QPen(QColor(20, 20, 20), 1.5)
-        fill = QColor(245, 245, 245)
-        p.setPen(outline)
-        p.setBrush(fill)
-        if kind == "open_hand":
-            for fx, top, height in ((-6.5, -9, 12), (-2.5, -12, 15),
-                                    (1.5, -12, 15), (5.5, -9, 12)):
-                p.drawRoundedRect(x + fx - 1.8, y + top, 3.6, height, 1.8, 1.8)
-            p.drawRoundedRect(x - 12, y - 2, 6, 9, 3, 3)            # thumb
-            p.drawRoundedRect(x - 8, y - 3, 16, 14, 4, 4)           # palm
-        else:
-            p.drawRoundedRect(x - 12, y - 1, 6, 8, 3, 3)            # thumb
-            p.drawRoundedRect(x - 8, y - 4, 16, 13, 4, 4)           # palm
-            for fx in (-6.5, -2.5, 1.5, 5.5):                       # knuckles
-                p.drawRoundedRect(x + fx - 1.8, y - 8, 3.6, 6, 1.8, 1.8)
+        # the PAN icon's hand, open while hovering and closed while
+        # dragging: a light outline over a dark fill reads on the dark
+        # model, on the white sheet and on a satellite image alike
+        from views.icons import draw_hand
+
+        p.translate(x - 12.0, y - 13.0)      # the palm on the hot spot
+        draw_hand(p, closed=kind != "open_hand", ink=HAND_INK, fill=HAND_FILL)
         p.restore()
 
     def _cursor_mode(self) -> str:

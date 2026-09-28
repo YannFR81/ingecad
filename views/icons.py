@@ -732,23 +732,56 @@ def _finger(x0: float, y0: float, x1: float, y1: float, w: float) -> QPainterPat
     return turn.map(path)
 
 
-def _pan():
-    # AutoCAD's open hand, in outline like the rest of the set: palm, four
-    # spread fingers and the thumb out to the left (Marco picked it,
-    # 2026-09-27, over a filled one; #32).
-    pm, p = _canvas()
+def hand_shape(closed: bool = False):
+    """The hand, in a 24-unit box: (outline path, crease lines).
+
+    One drawing for the PAN icon and for the canvas cursor, open while
+    hovering and closed while dragging (#32; Marco picked the fist from
+    three proposals, 2026-09-27): palm, four spread fingers and the thumb
+    out to the left -- or a fist seen from the front, four knuckles with
+    the creases between them and the thumb's line down the left.
+    """
     hand = QPainterPath()
-    hand.addRoundedRect(QRectF(6.6, 10.6, 11.0, 10.4), 4.2, 4.2)
-    for finger in (_finger(8.1, 12.0, 7.4, 4.6, 2.5),      # index
-                   _finger(10.9, 12.0, 10.9, 3.2, 2.5),    # middle
-                   _finger(13.7, 12.0, 14.4, 4.0, 2.5),    # ring
-                   _finger(16.2, 13.0, 17.8, 6.8, 2.3),    # little
-                   _finger(7.4, 17.0, 3.2, 11.8, 2.6)):    # thumb
-        hand = hand.united(finger)
-    pen = QPen(_STROKE, 1.3)
+    if not closed:
+        hand.addRoundedRect(QRectF(6.6, 10.6, 11.0, 10.4), 4.2, 4.2)
+        for finger in (_finger(8.1, 12.0, 7.4, 4.6, 2.5),      # index
+                       _finger(10.9, 12.0, 10.9, 3.2, 2.5),    # middle
+                       _finger(13.7, 12.0, 14.4, 4.0, 2.5),    # ring
+                       _finger(16.2, 13.0, 17.8, 6.8, 2.3),    # little
+                       _finger(7.4, 17.0, 3.2, 11.8, 2.6)):    # thumb
+            hand = hand.united(finger)
+        return hand.simplified(), []
+    hand.addRoundedRect(QRectF(6.2, 9.0, 12.4, 12.2), 5.0, 5.0)    # palm
+    heel = QPainterPath()
+    heel.addEllipse(QPointF(8.2, 16.2), 3.6, 4.4)                  # thumb mound
+    hand = hand.united(heel)
+    for x, top in ((8.3, 7.2), (11.0, 6.2), (13.7, 6.6), (16.3, 8.0)):
+        hand = hand.united(_finger(x, 11.5, x, top, 2.7))          # knuckles
+    creases = [((9.65, 8.4), (9.65, 10.4)), ((12.35, 7.9), (12.35, 10.2)),
+               ((15.0, 8.6), (15.0, 10.6)), ((7.0, 9.4), (7.0, 13.6))]
+    return hand.simplified(), creases
+
+
+def draw_hand(p: QPainter, closed: bool, ink: QColor, fill=None,
+              width: float = 1.3) -> None:
+    """:func:`hand_shape` stroked in ``ink`` (and filled, if given)."""
+    path, creases = hand_shape(closed)
+    pen = QPen(ink, width)
     pen.setJoinStyle(Qt.RoundJoin)
+    pen.setCapStyle(Qt.RoundCap)
+    p.save()
     p.setPen(pen)
-    p.drawPath(hand.simplified())
+    p.setBrush(fill if fill is not None else Qt.NoBrush)
+    p.drawPath(path)
+    for a, b in creases:
+        p.drawLine(QPointF(*a), QPointF(*b))
+    p.restore()
+
+
+def _pan():
+    # AutoCAD's open hand, in outline like the rest of the set
+    pm, p = _canvas()
+    draw_hand(p, closed=False, ink=_STROKE)
     p.end()
     return pm
 
