@@ -31,7 +31,7 @@ and IngePresupuestos (construction budgeting).
   trim/offset/extend, survey points with elevations, and printing to scale.
   Not a feature-for-feature AutoCAD clone.
 
-## Status — v0.6.4
+## Status — v0.6.5
 
 What works today:
 
@@ -115,7 +115,18 @@ What works today:
   window with template units and recent drawings with thumbnails, and
   undo/redo of everything.
 - **Output**: print / export PDF and PNG to exact scale, from model or
-  layout.
+  layout, the extents, the view or a window picked on the drawing, with
+  `.ctb` plot style tables; **PUBLISH** several layouts into one PDF;
+  File ▸ Export ▸ DXF for Blender or QGIS.
+- **External references** (XATTACH, -XREF and an Xrefs panel): a
+  colleague's drawings shown in place, snapped to, kept on save.
+- **Block attributes** (ATTDEF, the attribute editor on double-click,
+  ATTSYNC, BATTMAN) for title blocks; **leaders** (MLEADER, QLEADER,
+  LEADER); **DIM**, **QDIM**, DIMBREAK, DIMJOGGED, DIMSPACE; **PURGE**,
+  **OVERKILL**, **WBLOCK**; LENGTHEN, ALIGN, BOUNDARY, DONUT, SCALETEXT;
+  **annotative** text and dimensions at the annotation scale of each view.
+- **Scripts**: APPLOAD runs a Python file over IngeCAD's commands as one
+  undo step, SCRIPT runs an AutoCAD `.scr`.
 - **Raster images and PDF underlays**: attach PNG/JPEG/BMP/GIF/TIFF or a
   PDF page (rasterized) to trace over, with corner grips, brightness /
   contrast / fade and a transparency degree.

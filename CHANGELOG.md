@@ -1,8 +1,86 @@
 # Changelog
 
-## Unreleased
+## v0.6.5 — 2026-09-28
+
+The AutoCAD commands a colleague's drawing asks for: external references,
+block attributes, leaders, the dimension family, cleanup, plot style tables
+and a multi-page PUBLISH -- each with AutoCAD's own prompts, in its order.
+Viewports became fast to enter and to switch between, and the model
+regenerates on several cores.
+
+### AutoCAD commands
+- **External references** (#33). A drawing that references others now shows
+  them where they belong, found the way AutoCAD looks for them (the saved
+  path, then next to the drawing), each file read once. **XATTACH** (XA)
+  attaches a DWG or DXF, **-XREF** lists, detaches, reloads, unloads,
+  re-paths and overlays, and the new **Xrefs** tab of the sidebar does the
+  same with buttons. Object snaps reach the referenced geometry, and a click
+  selects the whole reference. Saving keeps every reference untouched.
+  Not yet: Bind, nested references beyond one level.
+- **Block attributes** (#35), which title blocks are made of. **ATTDEF**
+  (dialog) and **-ATTDEF**; **INSERT** asks each value with its prompt and
+  default; a **double-click** on the block opens the Enhanced Attribute
+  Editor; **-ATTEDIT** one at a time or globally, **ATTSYNC**, **BATTMAN**,
+  **ATTDISP**. Untouched attributes round-trip byte for byte.
+- **Leaders** (#34): **MLEADER** (MLD) with its Options, **QLEADER** (LE)
+  and **LEADER**, the text typed or written in the in-place editor.
+- **Dimensions** (#39): **DIM**, the unified command that picks the type by
+  what you point at; **QDIM** series (continuous, staggered, baseline,
+  ordinate, radius, diameter); **DIMBREAK**, **DIMJOGGED** (JOG) and
+  **DIMSPACE**.
+- **Cleanup** (#37): **PURGE** (dialog) and **-PURGE** with AutoCAD's three
+  prompts -- never layer 0, the current layer or a block still in use --
+  **OVERKILL** for duplicate and overlapping lines and arcs, and **WBLOCK**
+  (W) to write a block or a selection to its own drawing.
+- **LENGTHEN** (LEN), **ALIGN** (AL), **BOUNDARY** (BO), **DONUT** (DO) and
+  **SCALETEXT** (#38).
+- **Annotative objects can be created** (#43, what Rafael asked for): an
+  *Annotative* box in the text and dimension styles, text and dimensions
+  born at the current annotation scale, the scale of the view on the status
+  bar (the Model tab's CANNOSCALE, or the active viewport's), ANNOAUTOSCALE,
+  ANNOALLVISIBLE and **OBJECTSCALE**.
+- **Dynamic blocks** from AutoCAD show their current state and keep every
+  parameter on save (#36; changing the state from its grips comes later).
+
+### Plotting
+- **Plot style tables** (#41): PLOT and Page Setup offer the `.ctb` tables
+  (acad, monochrome, Grayscale, Screening 50%, and any a colleague sends,
+  dropped in `~/.config/IngeCAD/PlotStyles`); a layout plots with its own
+  table unless you choose another.
+- **PUBLISH** (File ▸ Publish): the layouts you tick, in one PDF, each page
+  the size of its sheet at 1:1.
+- **Plot area Window** (#52): *Window <* asks the two corners on the drawing
+  with a rectangle following the cursor, as AutoCAD does, and the dialog
+  comes back with everything as you left it.
+- **File ▸ Export ▸ DXF** and **DXFOUT** (#51): a DXF copy for Blender or
+  QGIS that leaves the open file as it was.
+
+### Scripts
+- **APPLOAD** (AP) runs a Python file over IngeCAD's commands -- everything
+  it draws is one undo step -- and **SCRIPT** (SCR) runs an AutoCAD `.scr`
+  (#44). `docs/plugins.md` has worked examples.
+
+### Viewports
+- **An active viewport navigates; it does not edit.** Double-click into a
+  viewport and the wheel, pan, ZOOM (nXP, Extents, Window) and VPLOCK work
+  on its view; drawing and editing happen in the Model tab, and a command
+  typed inside a viewport says so. Entering used to index the whole model
+  for editing through the paper -- 2 s of work and a freeze on the first
+  pan on a real plan.
+- **Switching between sheets no longer rebuilds the model for each one**
+  (2.3 s saved per switch on Planos Constructivos), and going back to a
+  sheet already seen is instant.
 
 ### Interface
+- **A "Loading <name>…" window** while a big drawing opens (#50): the file,
+  the phase (converting the DWG, reading, regenerating), the time, and
+  Cancel. It also shows during a long regeneration and Save as DWG.
+- **The status bar is yours to arrange**: right-click it, or press the ≡
+  button at its end, and tick what it shows -- as in AutoCAD and BricsCAD.
+  Out of the box it shows the classic SNAP, GRID, ORTHO, POLAR and OSNAP;
+  tracking, dynamic input and lineweight are one tick away, and F11/F12
+  work either way. The layout tabs no longer shrink to "...".
+
 - **The right sidebar folds away with one click** (#47), as in IngeTrazo: a
   slim handle sits on the line where the sidebar is resized, half-way down
   the drawing; click it and the drawing takes the whole width, click it

@@ -82,6 +82,12 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.6.5" date="2026-09-28">
+      <description>
+        <p>External references (XATTACH, XREF), block attributes for title blocks, leaders (MLEADER, QLEADER), DIM and QDIM, PURGE, OVERKILL and WBLOCK, annotative text and dimensions, .ctb plot style tables, PUBLISH to one PDF, a Window plot area, DXF export, Python scripts with APPLOAD, a status bar you arrange yourself, and viewports that are fast to enter and switch.</p>
+        <p xml:lang="es">Referencias externas (XATTACH, XREF), atributos de bloque para rótulos, directrices (MLEADER, QLEADER), DIM y QDIM, PURGE, OVERKILL y WBLOCK, textos y cotas anotativos, tablas de estilos de trazado .ctb, PUBLISH a un solo PDF, área de trazado Ventana, exportar a DXF, scripts de Python con APPLOAD, una barra de estado que uno mismo ordena, y ventanas gráficas rápidas al entrar y al cambiar de lámina.</p>
+      </description>
+    </release>
     <release version="0.6.4" date="2026-09-27">
       <description>
         <p>Save as DWG holds on real drawings (Civil 3D proxies keep their graphics; 116 to 185 of 213 test drawings reopen cleanly), FILLET, object snaps and CIRCLE follow AutoCAD's own flow, a Spanish AutoCAD acad.pgp works, classroom defaults, and no more multi-second freezes when undoing big edits.</p>
