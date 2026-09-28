@@ -196,6 +196,29 @@ class Dispatcher:
 # Every mutation is a Command: do() creates the entity in modelspace, undo()
 # deletes it. The ezdxf document IS the model — no shadow data structures.
 
+def dress_new_entity(document, entity, layer: str | None = None) -> None:
+    """Give a new entity the CURRENT properties, the ones the Properties
+    bar sets: layer, colour, linetype, lineweight. They default to ByLayer,
+    so a drawing stays layer-driven unless the user overrides it on purpose
+    -- and a command that already chose (OFFSET keeping the source's layer,
+    a factory that set a colour) keeps what it chose."""
+    from core import layers as layer_ops
+
+    wanted = layer if layer is not None \
+        else document.doc.header.get("$CLAYER", "0")
+    if wanted in document.doc.layers:
+        entity.dxf.layer = wanted
+    for prop in ("color", "linetype", "lineweight"):
+        if entity.dxf.hasattr(prop):
+            continue          # the factory already said what it wanted
+        value = layer_ops.current_property(document, prop)
+        if value != layer_ops.CURRENT_DEFAULTS[prop]:
+            try:
+                entity.dxf.set(prop, value)
+            except Exception:
+                pass
+
+
 class AddEntityCommand(Command):
     """Create one entity via a factory(msp) -> entity; undo deletes it.
 
@@ -212,26 +235,7 @@ class AddEntityCommand(Command):
 
     def do(self, document) -> None:
         self.entity = self._factory(self.space(document))
-        # New entities take the CURRENT properties, the ones the Properties
-        # bar sets: layer, colour, linetype, lineweight. They default to
-        # ByLayer, so a drawing stays layer-driven unless the user overrides
-        # it on purpose — and a command that already chose (OFFSET keeping
-        # the source's layer) keeps what it chose.
-        from core import layers as layer_ops
-
-        wanted = self.layer if self.layer is not None \
-            else document.doc.header.get("$CLAYER", "0")
-        if wanted in document.doc.layers:
-            self.entity.dxf.layer = wanted
-        for prop in ("color", "linetype", "lineweight"):
-            if self.entity.dxf.hasattr(prop):
-                continue          # the factory already said what it wanted
-            value = layer_ops.current_property(document, prop)
-            if value != layer_ops.CURRENT_DEFAULTS[prop]:
-                try:
-                    self.entity.dxf.set(prop, value)
-                except Exception:
-                    pass
+        dress_new_entity(document, self.entity, self.layer)
         document.dirty = True
 
     def undo(self, document) -> None:
