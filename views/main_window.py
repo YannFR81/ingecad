@@ -1285,6 +1285,9 @@ class MainWindow(QMainWindow):
 
         # -- Dimension --------------------------------------------------------
         dim_menu = menu_bar.addMenu(tr("Dimension"))
+        cmd_item(dim_menu, tr("Quick Dimension"), "QDIM")
+        cmd_item(dim_menu, tr("Dimension"), "DIM")
+        dim_menu.addSeparator()
         cmd_item(dim_menu, tr("Linear"), "DIMLINEAR")
         cmd_item(dim_menu, tr("Aligned"), "DIMALIGNED")
         cmd_item(dim_menu, tr("Arc Length"), "DIMARC")
@@ -1292,9 +1295,12 @@ class MainWindow(QMainWindow):
         cmd_item(dim_menu, tr("Radius"), "DIMRADIUS")
         cmd_item(dim_menu, tr("Diameter"), "DIMDIAMETER")
         cmd_item(dim_menu, tr("Angular"), "DIMANGULAR")
+        cmd_item(dim_menu, tr("Jogged"), "DIMJOGGED")
         dim_menu.addSeparator()
         cmd_item(dim_menu, tr("Baseline"), "DIMBASELINE")
         cmd_item(dim_menu, tr("Continue"), "DIMCONTINUE")
+        cmd_item(dim_menu, tr("Adjust Space"), "DIMSPACE")
+        cmd_item(dim_menu, tr("Dimension Break"), "DIMBREAK")
         dim_menu.addSeparator()
         cmd_item(dim_menu, tr("Multileader"), "MLEADER")
         cmd_item(dim_menu, tr("Quick Leader"), "QLEADER")
@@ -3133,6 +3139,7 @@ class MainWindow(QMainWindow):
                      "DIMANGULAR", "DIMARC", "DIMORDINATE", "DIMCENTER",
                      "CENTERMARK", "CENTERLINE",
                      "DIMCONTINUE", "DIMBASELINE", "DIMTEDIT",
+                     "DIM", "QDIM", "DIMBREAK", "DIMJOGGED", "DIMSPACE",
                      "MLEADER", "QLEADER", "LEADER",
                      "MVIEW", "XLINE", "RAY", "DIVIDE", "MEASURE",
                      "REVCLOUD",

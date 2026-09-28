@@ -75,6 +75,8 @@ DEFAULT_ALIASES: dict[str, str] = {
     "DBA": "DIMBASELINE",
     "DIMBASE": "DIMBASELINE",
     "DIMTED": "DIMTEDIT",
+    "DJO": "DIMJOGGED",
+    "JOG": "DIMJOGGED",
     "MLD": "MLEADER",
     "LE": "QLEADER",
     "LEAD": "LEADER",

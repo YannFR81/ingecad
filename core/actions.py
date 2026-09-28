@@ -1306,6 +1306,9 @@ class AddDimensionCommand(Command):
         #: points: the controller answers from what was snapped through a
         #: viewport. Redo keeps the answer.
         self.dimlfac_resolver = None
+        #: DIM's Layer option: the layer the dimension lands on instead of
+        #: the current one. None = $CLAYER, as every other dimension.
+        self.layer: str | None = None
 
     def do(self, document) -> None:
         override = self._factory(self.space(document), document)
@@ -1318,7 +1321,7 @@ class AddDimensionCommand(Command):
         override.render()
         self.dim = override.dimension
         self._block_name = self.dim.dxf.get("geometry", None)
-        current = document.doc.header.get("$CLAYER", "0")
+        current = self.layer or document.doc.header.get("$CLAYER", "0")
         if current in document.doc.layers:
             self.dim.dxf.layer = current
         # AFTER the layer lands: the stamp dresses the block in the
