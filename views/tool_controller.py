@@ -1627,6 +1627,10 @@ class ToolController(QObject):
                 continue
             if e not in self._pending_render:
                 self._pending_render.append(e)
+        if any(e.dxftype() == "VIEWPORT" for e in alive):
+            # the overlay cannot show a viewport (see _refresh_overlay): the
+            # background regen does, as for the edit this undoes
+            self.window.regen_in_memory()
         patchable = self._KNOWN_MODIFY + (
             actions.AddEntityCommand, actions.PasteCommand,
             actions.CopyEntitiesCommand, actions.SnapshotCommand)
@@ -1750,6 +1754,12 @@ class ToolController(QObject):
                      if e.is_alive and e.dxf.owner is not None
                      and e.dxf.handle not in self._base_handles]
         entities += self.grip_overlay_entities()
+        # A VIEWPORT is the model re-projected: drawn here it redrew the
+        # whole model through it on the GUI thread (undo of a MOVE on
+        # Planos Constructivos' sheet: 5.3 s frozen, found by the release
+        # bench once viewports stopped drawing empty). Only the regen shows
+        # a viewport; every path that touches one asks for it.
+        entities = [e for e in entities if e.dxftype() != "VIEWPORT"]
         scene = (build_scene_for_entities(document, entities, self._flatten,
                                           self.canvas_space())
                  if entities else None)
