@@ -1629,8 +1629,13 @@ class ToolController(QObject):
                 self._pending_render.append(e)
         if any(e.dxftype() == "VIEWPORT" for e in alive):
             # the overlay cannot show a viewport (see _refresh_overlay): the
-            # background regen does, as for the edit this undoes
-            self.window.regen_in_memory()
+            # background regen does, as for the edit this undoes. Started
+            # once this undo's overlay is built, not before: the two fought
+            # over the interpreter and the undo froze 1.2 s instead of 0.5
+            # (Iray's sheet, release bench).
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, self.window.regen_in_memory)
         patchable = self._KNOWN_MODIFY + (
             actions.AddEntityCommand, actions.PasteCommand,
             actions.CopyEntitiesCommand, actions.SnapshotCommand)

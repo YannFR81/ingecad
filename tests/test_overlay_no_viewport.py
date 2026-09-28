@@ -63,6 +63,9 @@ def test_undoing_a_move_of_a_viewport_leaves_it_to_the_regen(qapp):
         assert not [e for e in drawn if e.dxftype() == "VIEWPORT"], \
             "a viewport was drawn through the overlay"
         assert any(e.dxftype() == "TEXT" for e in drawn), "the rest still rides the overlay"
+        assert not regens, "the regen started before the undo's overlay was built"
+        for _ in range(3):
+            qapp.processEvents()
         assert regens, "nothing asked the regen to show the viewport back"
         assert took < 2.0
         _wait(qapp, win)
