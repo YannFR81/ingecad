@@ -947,6 +947,17 @@ class MainWindow(QMainWindow):
                 tr("Select objects to bring to front:") if mode == "front"
                 else tr("Select objects to send to back:"))
 
+    def _publish_dialog(self) -> None:
+        """PUBLISH (p. 1509): the layouts of the drawing into one PDF."""
+        from views.publish_dialog import PublishDialog
+
+        if self.document is None:
+            return
+        if len(self.document.doc.layouts) < 2:
+            self.command_line.echo(tr("This drawing has no layouts to publish."))
+            return
+        PublishDialog(self).exec()
+
     def _plot_dialog(self) -> None:
         if self.document is None:
             self.command_line.echo(tr("Nothing to plot."))
@@ -1089,6 +1100,7 @@ class MainWindow(QMainWindow):
              icon="PAGESETUP")
         item(file_menu, tr("Plot..."), self._plot_dialog, QKeySequence.Print,
              icon="PLOT")
+        item(file_menu, tr("Publish..."), self._publish_dialog)
         file_menu.addSeparator()
         item(file_menu, tr("Quit"), self.close, QKeySequence.Quit)
 
@@ -3070,6 +3082,7 @@ class MainWindow(QMainWindow):
         d.register("PASTECLIP", lambda *a: self._cmd_paste())
         d.register("PLOT", lambda *a: self._plot_dialog())
         d.register("PRINT", lambda *a: self._plot_dialog())
+        d.register("PUBLISH", lambda *a: self._publish_dialog())
         d.register("LAYOUT", self._cmd_layout)
         d.register("MSPACE", self._cmd_mspace)
         d.register("DRAWINGRECOVERY", self._cmd_drawing_recovery)

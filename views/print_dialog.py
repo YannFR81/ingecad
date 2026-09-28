@@ -53,11 +53,35 @@ class PrintDialog(QDialog):
         self.units.addItem(tr("Meters"), 1000.0)       # 1 unit = 1000 mm
         self.units.addItem(tr("Millimeters"), 1.0)
 
+        # Plot style table (pen assignments): the layout's own by default,
+        # as the Page Setup left it; the folder's tables to choose from.
+        from core import plotstyles
+
+        self.style = QComboBox(self)
+        self.style.addItem(tr("None"), "")
+        for name in plotstyles.available():
+            self.style.addItem(name, name)
+        current = ""
+        if window.document is not None:
+            try:
+                layout = (window.document.doc.layouts.get(self._layout_name)
+                          if self._layout_name != "Model"
+                          else window.document.doc.modelspace())
+                current = str(layout.dxf_layout.dxf.get("current_style_sheet", "") or "")
+            except Exception:                # noqa: BLE001 - no table then
+                current = ""
+        idx = self.style.findData(current)
+        if idx < 0 and current:
+            self.style.addItem(current, current)
+            idx = self.style.count() - 1
+        self.style.setCurrentIndex(max(idx, 0))
+
         form.addRow(tr("Paper size"), self.paper)
         form.addRow(tr("Orientation"), self.orientation)
         form.addRow(tr("Plot area"), self.area)
         form.addRow(tr("Scale"), self.scale)
         form.addRow(tr("Drawing unit"), self.units)
+        form.addRow(tr("Plot style table"), self.style)
 
         buttons = QDialogButtonBox(self)
         pdf_btn = QPushButton(tr("Save PDF..."), self)
@@ -92,16 +116,19 @@ class PrintDialog(QDialog):
             return self.window.viewport._view_world_rect()
         return None                             # extents
 
+    def _ctb(self) -> str:
+        return self.style.currentData() or ""
+
     def _plot_on(self, printer) -> None:
         if self._layout_mode():
             pdf_out.plot_layout(self.window.document, printer,
-                                self._layout_name)
+                                self._layout_name, ctb=self._ctb())
             return
         pdf_out.plot(
             self.window.document, printer,
             layout_name=getattr(self.window, "_active_layout", None),
             area=self._area_rect(),
-            mm_per_unit=self._mm_per_unit())
+            mm_per_unit=self._mm_per_unit(), ctb=self._ctb())
 
     # -- outputs ---------------------------------------------------------------
     def _to_pdf(self) -> None:

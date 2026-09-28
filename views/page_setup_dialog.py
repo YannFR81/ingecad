@@ -217,8 +217,13 @@ class PageSetupDialog(QDialog):
         self.style_sheet = QComboBox(self)
         self.style_sheet.setEditable(True)
         self.style_sheet.addItem(tr("None"), "")
-        for name in _STYLE_SHEETS[1:]:
+        from core import plotstyles
+
+        for name in plotstyles.available():
             self.style_sheet.addItem(name, name)
+        for name in _STYLE_SHEETS[1:]:
+            if self.style_sheet.findData(name) < 0:
+                self.style_sheet.addItem(name, name)
         current_style = str(dxf.get("current_style_sheet", "") or "")
         idx = self.style_sheet.findData(current_style)
         if idx >= 0:

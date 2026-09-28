@@ -27,9 +27,78 @@ PAPER_SIZES_MM = {
 COMMON_SCALES = (10, 20, 25, 50, 75, 100, 125, 200, 250, 500, 1000, 2000)
 
 
-def build_graphics_scene(document, layout_name: str | None = None):
-    """Replay a layout into a QGraphicsScene (vector items, world coords)."""
+class _PlotRenderContext:
+    """Built by :func:`_plot_context`: ezdxf's RenderContext with a .ctb's
+    pens applied to every colour -- explicit colour, grayscale, screening --
+    including true-colour entities (by their nearest ACI, as AutoCAD plots
+    them). Lineweights come through ezdxf itself (``plot_styles``)."""
+
+
+def _plot_context(doc, table):
+    from ezdxf import colors as _colors
     from ezdxf.addons.drawing import RenderContext
+
+    if table is None or table.named:
+        return RenderContext(doc, export_mode=True)
+
+    class PlotRenderContext(RenderContext):
+        def _true_entity_color(self, true_color, aci):
+            if true_color is not None:
+                rgb = tuple(true_color)
+                aci = _nearest_aci(rgb)
+            elif 0 < aci < 256:
+                rgb = _colors.int2rgb(_colors.DXF_DEFAULT_COLORS[aci])
+                if aci == 7:
+                    rgb = _hex_to_rgb(self.current_layout_properties.default_color)
+            else:
+                return self.current_layout_properties.default_color
+            return "#%02x%02x%02x" % tuple(table.pen_color(aci, rgb))
+
+    return PlotRenderContext(doc, ctb=table.table, export_mode=True)
+
+
+def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+    value = value.lstrip("#")
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def _nearest_aci(rgb) -> int:
+    from ezdxf import colors as _colors
+
+    best, best_d = 7, None
+    for aci in range(1, 256):
+        r, g, b = _colors.int2rgb(_colors.DXF_DEFAULT_COLORS[aci])
+        d = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2
+        if best_d is None or d < best_d:
+            best, best_d = aci, d
+    return best
+
+
+def plot_style_for(document, layout_name: str | None, ctb: str | None):
+    """The table to plot with: the caller's choice, else the layout's own
+    ``current_style_sheet`` (Page Setup), else none; an empty name means none."""
+    from core import plotstyles
+
+    if ctb is None:
+        layout = None
+        if layout_name and layout_name in document.doc.layouts:
+            layout = document.doc.layouts.get(layout_name)
+        elif not layout_name or layout_name == "Model":
+            layout = document.doc.modelspace()
+        try:
+            ctb = str(layout.dxf_layout.dxf.get("current_style_sheet", "") or "")
+        except Exception:                 # noqa: BLE001 - no layout, no table
+            ctb = ""
+    return plotstyles.load(ctb) if ctb else None
+
+
+def build_graphics_scene(document, layout_name: str | None = None,
+                         ctb: str | None = None):
+    """Replay a layout into a QGraphicsScene (vector items, world coords).
+
+    ``ctb`` names the plot style table (see core.plotstyles); None takes the
+    layout's own, "" plots with none.
+    """
     from ezdxf.addons.drawing.pyqt import PyQtBackend
     from PySide6.QtWidgets import QGraphicsScene
 
@@ -44,7 +113,8 @@ def build_graphics_scene(document, layout_name: str | None = None):
     backend = PyQtBackend(scene)
     # export_mode: render as plotted — layers with Plot off are skipped
     # (they still display on screen, exactly AutoCAD's Plot column).
-    context = RenderContext(document.doc, export_mode=True)
+    context = _plot_context(document.doc,
+                            plot_style_for(document, layout_name, ctb))
     # The canvas's frontend, so the plot obeys the same rules the screen
     # does: a dimension's block drawn in the dimension's colour (ISO-25 is
     # ByBlock), MULTILEADER content instead of its baked proxy picture, a
@@ -101,14 +171,18 @@ def _use_physical_pens(scene) -> None:
 def plot(document, printer, layout_name: str | None = None,
          area: tuple[float, float, float, float] | None = None,
          mm_per_unit: float | None = None,
-         physical_pens: bool = False) -> None:
+         physical_pens: bool = False, ctb: str | None = None,
+         painter: QPainter | None = None) -> None:
     """Render onto ``printer`` (PDF file or a physical printer).
 
     ``area`` is the world rect (x0, y0, x1, y1) to plot; None plots the
     extents. ``mm_per_unit`` fixes the scale (paper mm per drawing unit);
     None fits the area to the page. The plot is centred on the page.
+    ``ctb`` is the plot style table (None: the layout's own). ``painter``
+    lets PUBLISH draw several pages with one painter; None opens and closes
+    its own.
     """
-    scene = build_graphics_scene(document, layout_name)
+    scene = build_graphics_scene(document, layout_name, ctb)
     if physical_pens:
         _use_physical_pens(scene)
     if area is None:
@@ -117,7 +191,10 @@ def plot(document, printer, layout_name: str | None = None,
     x0, y0, x1, y1 = area
     aw, ah = max(x1 - x0, 1e-9), max(y1 - y0, 1e-9)
 
-    painter = QPainter(printer)
+    own_painter = painter is None
+    if own_painter:
+        painter = QPainter(printer)
+    painter.save()
     try:
         page = printer.pageRect(printer.Unit.DevicePixel)
         px_per_mm = printer.resolution() / 25.4
@@ -137,7 +214,9 @@ def plot(document, printer, layout_name: str | None = None,
         source = QRectF(x0, y0, aw, ah)
         scene.render(painter, target, source)
     finally:
-        painter.end()
+        painter.restore()
+        if own_painter:
+            painter.end()
 
 
 def layout_sheet(document, layout_name: str):
@@ -150,14 +229,40 @@ def layout_sheet(document, layout_name: str):
     return (x1 - x0, y1 - y0), sheet
 
 
-def plot_layout(document, printer, layout_name: str) -> None:
+def plot_layout(document, printer, layout_name: str,
+                ctb: str | None = None, painter: QPainter | None = None) -> None:
     """Plot a paperspace layout at 1:1 — the sheet maps mm-to-mm onto the
     page, so every viewport prints at its exact scale (the AutoCAD
     contract: layouts plot at 1:1, the scale lives in the viewports)."""
     _size, sheet = layout_sheet(document, layout_name)
     printer.setFullPage(True)   # the sheet IS the page; margins are drawn
     plot(document, printer, layout_name, area=sheet, mm_per_unit=1.0,
-         physical_pens=True)    # scene units are paper mm on a layout
+         physical_pens=True, ctb=ctb, painter=painter)   # paper mm on a layout
+
+
+def publish(document, layout_names, path: str, ctb: str | None = None) -> int:
+    """PUBLISH: several layouts into ONE multi-page PDF, each page the
+    size of its sheet, each layout at 1:1. Returns the number of pages."""
+    from PySide6.QtCore import QSizeF
+    from PySide6.QtGui import QPageSize
+
+    names = [n for n in layout_names if n in document.doc.layouts and n != "Model"]
+    if not names:
+        return 0
+    (width, height), _sheet = layout_sheet(document, names[0])
+    printer = make_pdf_printer_mm(path, width, height)
+    painter = QPainter(printer)
+    try:
+        for index, name in enumerate(names):
+            if index:
+                (width, height), _sheet = layout_sheet(document, name)
+                printer.setPageSize(QPageSize(QSizeF(width, height),
+                                              QPageSize.Millimeter))
+                printer.newPage()
+            plot_layout(document, printer, name, ctb=ctb, painter=painter)
+    finally:
+        painter.end()
+    return len(names)
 
 
 def make_pdf_printer_mm(path: str, width_mm: float, height_mm: float):

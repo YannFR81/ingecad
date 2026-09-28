@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT))
 from core import i18n  # noqa: E402
 
 SKIP_DIRS = {"build", "web", "vendor", ".venv", "venv", "externos", "tests",
-             "plugins"}     # a plugin's strings live in ITS pack (below)
+             "plugins", ".claude"}     # .claude: agent worktrees, other branches     # a plugin's strings live in ITS pack (below)
 
 
 def _maintained() -> list[str]:
