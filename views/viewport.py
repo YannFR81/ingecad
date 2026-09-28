@@ -170,6 +170,18 @@ def _paper_vertices(paper: dict, origin: tuple[float, float]) -> tuple:
     return tris, lines
 
 
+def thick_half_world(lineweight_mm: float, lwt_on: bool,
+                     px_per_unit: float) -> float:
+    """Half the width of a lineweight, in units of the scene it belongs to.
+
+    LWT on: the weight in millimetres at the screen's pixels per mm (as
+    AutoCAD displays lineweights, never thinner than a pixel); off: a
+    hairline. ``px_per_unit`` is what one scene unit spans on screen.
+    """
+    px = max(1.0, lineweight_mm * PX_PER_MM) if lwt_on else 1.0
+    return (px / 2.0) / px_per_unit
+
+
 def _axes_vertices() -> np.ndarray:
     """X and Y world axes through the origin in the standard vertex format."""
     data = np.zeros(4, dtype=VERTEX_DTYPE)
@@ -1200,7 +1212,7 @@ class Viewport(QOpenGLWidget):
             vao.release()
         self._program.release()
         self._draw_thick(gl, mvp, model_rect, self._live_vp_bufs.get("thick"),
-                         scene.thick)
+                         scene.thick, px_per_unit=px_per_unit)
 
     def _upload_overlay(self) -> None:
         for vao, vbo, _count in self._overlay_bufs.values():
@@ -1355,14 +1367,22 @@ class Viewport(QOpenGLWidget):
         x1, y0 = self.view.screen_to_world(self.width(), self.height())
         return (x0, y0, x1, y1)
 
-    def _draw_thick(self, gl, mvp: QMatrix4x4, view_rect, buf, batch) -> None:
+    def _draw_thick(self, gl, mvp: QMatrix4x4, view_rect, buf, batch,
+                    px_per_unit: Optional[float] = None) -> None:
         """Thick lineweight quads: one draw per visible weight range.
 
         ``view_rect`` of None skips culling — the overlay/ghost/stamp scenes
         are small and their bounds are not view-aligned once offset.
+        ``px_per_unit`` is how many screen pixels one unit of THIS scene
+        spans: the view's scale, unless the scene is the model shown
+        through a viewport, where the viewport's factor multiplies it — a
+        0.5 mm line inside a 1:50 viewport drew 50 times too wide without
+        it (Marco's video, 2026-09-27: black bars for walls).
         """
         if buf is None:
             return
+        if px_per_unit is None:
+            px_per_unit = self.view.scale
         vao, _vbo, _count = buf
         prog = self._thick_program
         prog.bind()
@@ -1376,8 +1396,7 @@ class Viewport(QOpenGLWidget):
                 if bx0 > x1 or bx1 < x0 or by0 > y1 or by1 < y0:
                     continue
             # LWT off: draw thick entities as hairlines (AutoCAD's LWT toggle)
-            px = max(1.0, rng.lineweight * PX_PER_MM) if self.lwt_on else 1.0
-            half_world = (px / 2.0) / self.view.scale
+            half_world = thick_half_world(rng.lineweight, self.lwt_on, px_per_unit)
             prog.setUniformValue1f(self._loc_half_world, half_world)
             gl.glDrawArrays(GL_TRIANGLES, rng.first, rng.count)
         vao.release()

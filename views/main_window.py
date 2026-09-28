@@ -2925,6 +2925,12 @@ class MainWindow(QMainWindow):
         self.viewport.set_scene(scene)
         self.tools.mark_scene_merged()
         self._layout_scenes[layout] = (revision, scene)
+        if layout != "Model" and getattr(self, "_vp_warm_pending", False):
+            # the sheet is up: build the model for navigating its viewports
+            # now, so a double-click finds it ready instead of a couple of
+            # seconds later (Marco's video: "demora unos segundos")
+            self._vp_warm_pending = False
+            self._vp_warm_live_scene()
         if self.viewport._live_vp is not None:
             # A viewport gesture was live over the old sheet. If it is still
             # going (a new burst began while this regen ran), the fresh
@@ -4161,6 +4167,7 @@ class MainWindow(QMainWindow):
 
     def switch_layout(self, name: str) -> None:
         """Model/Layout tabs: re-render the chosen space (AutoCAD tabs)."""
+        self._vp_warm_pending = name != "Model"
         if self._block_session is not None:
             # AutoCAD hides the tabs entirely while the Block Editor is
             # open; refusing the switch is the same rule, said out loud.

@@ -62,7 +62,13 @@
   the background from the double-click (it used to freeze the first pan
   tick, 5.8 s on a real sheet), each viewport draws only the model it
   shows, and the GPU buffers survive between gestures. A drag now costs
-  the same as panning the paper.
+  the same as panning the paper. The model for the live view is now
+  prepared as soon as the sheet tab is shown, so the double-click finds
+  it ready.
+- **Lineweights inside a viewport were drawn at the paper's scale while
+  navigating live**: a 0.5 mm wall in a 1:50 viewport became a black bar
+  50 times too wide (Marco's video). They are now the same width live as
+  on the baked sheet.
 - **A sheet no longer loses part of a block now and then.** The viewport
   culling cached bounding boxes by object identity, and a block's content
   is drawn from temporary copies whose identity Python reuses: a later

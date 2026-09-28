@@ -164,3 +164,98 @@ def test_dragging_right_after_the_double_click_never_freezes_or_regens(win):
         QApplication.processEvents()
     assert win.viewport._live_vp is not None          # caught up, mid-gesture
     assert fired == []
+
+
+def test_thick_half_world_scales_with_the_scene_s_pixels_per_unit():
+    """A 0.5 mm line is 0.5 mm on screen whatever scene it lives in: the
+    model shown through a 1:50 viewport spans 50 times fewer pixels per
+    unit, so its half width in model units is 50 times larger."""
+    from views.viewport import PX_PER_MM, thick_half_world
+
+    paper = thick_half_world(0.5, True, 4.0)                # 4 px per paper mm
+    model = thick_half_world(0.5, True, 4.0 * (1 / 50))     # through a 1:50 viewport
+    assert paper == pytest.approx(0.5 * PX_PER_MM / 2 / 4.0)
+    assert model == pytest.approx(paper * 50)
+    assert thick_half_world(0.5, False, 4.0) == pytest.approx(0.5 / 4.0)   # LWT off: a hairline
+    assert thick_half_world(0.0, True, 4.0) == pytest.approx(0.5 / 4.0)    # never under a pixel
+
+
+def test_a_thick_line_inside_a_viewport_is_as_wide_live_as_baked(qapp):
+    """Marco's video (2026-09-27): entering a viewport turned every wall
+    into a black bar. The live path drew the model's lineweights at the
+    paper's pixels per unit, 50x too wide in a 1:50 viewport. Pixels, live
+    against baked, at the same view; needs a real GL context."""
+    import numpy as np
+    from PySide6.QtGui import QGuiApplication, QImage
+    from PySide6.QtTest import QTest
+
+    if QGuiApplication.platformName() in ("offscreen", "minimal"):
+        pytest.skip("no OpenGL on this platform: the pixels need a real context")
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document("mm")
+    win.resize(1000, 700)
+    win.show()
+    QTest.qWaitForWindowExposed(win, 5000)
+    try:
+        doc = win.document
+        doc.modelspace().add_line((0, 0), (5000, 0), dxfattribs={"lineweight": 100})
+        psp = doc.doc.layouts.get("Layout1")
+        vp = psp.add_viewport(center=(150, 100), size=(120, 80),
+                              view_center_point=(2500, 0), view_height=4000)
+        win.viewport.lwt_on = True
+        win.switch_layout("Layout1")
+
+        def wait():
+            deadline = 60
+            import time
+            t = time.monotonic()
+            while time.monotonic() - t < deadline:
+                qapp.processEvents()
+                live = getattr(win, "_vp_live_worker", None)
+                if (win._regen_worker is None and not win.tools._warmers
+                        and not (live is not None and live.isRunning())):
+                    break
+            for _ in range(5):
+                qapp.processEvents()
+
+        shots = {}
+
+        def rows_of_ink(label):
+            win.viewport.grabFramebuffer()
+            img = win.viewport.grabFramebuffer().convertToFormat(QImage.Format_RGB888)
+            shots[label] = img
+            a = np.frombuffer(img.constBits(), np.uint8).reshape(
+                img.height(), img.bytesPerLine())[:, :img.width() * 3]
+            a = a.reshape(img.height(), img.width(), 3).astype(int)
+            dark = np.all(a < 80, axis=2)                      # the black line
+            # a band around where the line's middle lands on screen, and
+            # only the rows near it (the viewport's frame stays outside)
+            dpr = img.devicePixelRatio()
+            sx, sy = win.viewport.view.world_to_screen(150.0, 100.0)
+            cx, cy = int(sx * dpr), int(sy * dpr)
+            band = dark[max(0, cy - 40): cy + 40, max(0, cx - 5): cx + 5]
+            return int(band.any(axis=1).sum())
+
+        wait()
+        win.viewport.zoom_extents()
+        wait()
+        baked = rows_of_ink("baked")
+        assert baked >= 2
+        win._activate_viewport(vp)
+        wait()
+        assert win.vp_view_pan(0.0, 0.0) is True
+        wait()
+        assert win.viewport._live_vp is not None
+        live = rows_of_ink("live")
+        if abs(live - baked) > 1:
+            import tempfile
+
+            folder = tempfile.mkdtemp(prefix="ingecad-lwt-")
+            for label, img in shots.items():
+                img.save(f"{folder}/{label}.png")
+        assert abs(live - baked) <= 1, f"live {live} rows, baked {baked} (see {folder})"
+    finally:
+        win.document.dirty = False
+        win.close()
