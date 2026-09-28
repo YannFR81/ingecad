@@ -106,6 +106,11 @@ DEFAULT_ALIASES: dict[str, str] = {
     "AR": "ARRAY",
     "-AR": "ARRAY",
     "PE": "PEDIT",
+    "LEN": "LENGTHEN",
+    "AL": "ALIGN",
+    "BO": "BOUNDARY",
+    "-BO": "-BOUNDARY",
+    "DO": "DONUT",
 }
 
 

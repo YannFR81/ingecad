@@ -1253,6 +1253,8 @@ class MainWindow(QMainWindow):
         cmd_item(point_menu, tr("Divide"), "DIVIDE")
         cmd_item(point_menu, tr("Measure"), "MEASURE")
         cmd_item(draw_menu, tr("Spline"), "SPLINE")
+        cmd_item(draw_menu, tr("Donut"), "DONUT", icon=False)
+        cmd_item(draw_menu, tr("Boundary..."), "BOUNDARY", icon=False)
         cmd_item(draw_menu, tr("Revision Cloud"), "REVCLOUD")
         cmd_item(draw_menu, tr("Table..."), "TABLE", icon=False)
         draw_menu.addSeparator()
@@ -1302,6 +1304,10 @@ class MainWindow(QMainWindow):
         for label, name in ((tr("Stretch"), "STRETCH"), (tr("Break"), "BREAK"),
                             (tr("Join"), "JOIN")):
             cmd_item(modify_menu, label, name)
+        cmd_item(modify_menu, tr("Lengthen"), "LENGTHEN", icon=False)
+        # AutoCAD keeps ALIGN under Modify > 3D Operations; a 2D CAD has no
+        # such submenu, so it sits with the other modify commands.
+        cmd_item(modify_menu, tr("Align"), "ALIGN", icon=False)
         modify_menu.addSeparator()
         cmd_item(modify_menu, tr("Match Properties"), "MATCHPROP")
         # ONE Object submenu -- there used to be two of them, both added to
@@ -1314,6 +1320,9 @@ class MainWindow(QMainWindow):
         cmd_item(image_menu, tr("Transparency"), "TRANSPARENCY", icon=False)
         cmd_item(object_menu, tr("Polyline"), "PEDIT")
         cmd_item(object_menu, tr("Hatch..."), "HATCHEDIT")
+        # AutoCAD: Modify > Object > Text > Scale
+        text_menu = object_menu.addMenu(tr("Text"))
+        cmd_item(text_menu, tr("Scale"), "SCALETEXT", icon=False)
         cmd_item(modify_menu, tr("Explode"), "EXPLODE")
 
         # -- Tools ------------------------------------------------------------
@@ -3021,7 +3030,9 @@ class MainWindow(QMainWindow):
                      "CHAMFER", "ARRAY", "MATCHPROP", "PEDIT",
                      "DRAWORDER", "LAYISO", "LAYOFF", "LAYFRZ", "LAYLCK",
                      "LAYULK", "IMAGEATTACH",
-                     "TABLE", "PDFATTACH", "IMAGEADJUST", "TRANSPARENCY"):
+                     "TABLE", "PDFATTACH", "IMAGEADJUST", "TRANSPARENCY",
+                     "LENGTHEN", "ALIGN", "BOUNDARY", "-BOUNDARY", "DONUT",
+                     "SCALETEXT"):
             d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         d.register("ADJUST", lambda *a: self.tools.start_tool("IMAGEADJUST"))
         d.register("CLEANSCREENON", lambda *a: self._clean_screen(True))

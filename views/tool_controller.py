@@ -31,6 +31,12 @@ from tools.construct import CONSTRUCT_TOOL_CLASSES
 from tools.inquiry import INQUIRY_TOOL_CLASSES
 from tools.modify import MODIFY_TOOL_CLASSES
 from tools.layout_tools import LAYOUT_TOOL_CLASSES
+# #38: the everyday commands that were missing, one module each
+from tools.align import ALIGN_TOOL_CLASSES
+from tools.boundary import BOUNDARY_TOOL_CLASSES
+from tools.donut import DONUT_TOOL_CLASSES
+from tools.lengthen import LENGTHEN_TOOL_CLASSES
+from tools.scaletext import SCALETEXT_TOOL_CLASSES
 from views.apertures import GRIP_PX, PICKBOX_DEFAULT, SNAP_PX
 
 # Overlay entities beyond this schedule an idle merge into the base scene
@@ -148,7 +154,10 @@ class _GhostWorker(QThread):
 ALL_TOOL_CLASSES = {**TOOL_CLASSES, **EDIT_TOOL_CLASSES, **BLOCK_TOOL_CLASSES,
                     **DIM_TOOL_CLASSES, **LAYOUT_TOOL_CLASSES,
                     **CONSTRUCT_TOOL_CLASSES, **INQUIRY_TOOL_CLASSES,
-                    **MODIFY_TOOL_CLASSES}
+                    **MODIFY_TOOL_CLASSES,
+                    **LENGTHEN_TOOL_CLASSES, **ALIGN_TOOL_CLASSES,
+                    **BOUNDARY_TOOL_CLASSES, **DONUT_TOOL_CLASSES,
+                    **SCALETEXT_TOOL_CLASSES}
 
 
 #: name -> (owner, windows using it). The registry is process-wide and a

@@ -2556,3 +2556,25 @@ def add_arc_sce(start, center, end) -> AddEntityCommand:
     return AddEntityCommand(
         "ARC", lambda msp: msp.add_arc((center[0], center[1]), radius,
                                        a_start, a_end))
+
+
+# -- DONUT ---------------------------------------------------------------------
+
+def donut_vertices(center, inside: float, outside: float):
+    """The xyseb rows of a DONUT: "two arc polylines joined end-to-end"
+    (DONUT, p. 656) -- a closed polyline of two half circles whose constant
+    width spans the ring; an inside diameter of 0 is a filled circle."""
+    inside, outside = abs(float(inside)), abs(float(outside))
+    if outside < inside:
+        inside, outside = outside, inside
+    width = outside - inside
+    radius = (outside + inside) / 4.0
+    cx, cy = float(center[0]), float(center[1])
+    return [(cx - radius, cy, width / 2.0, width / 2.0, 1.0),
+            (cx + radius, cy, width / 2.0, width / 2.0, 1.0)]
+
+
+def add_donut(center, inside: float, outside: float) -> AddEntityCommand:
+    rows = donut_vertices(center, inside, outside)
+    return AddEntityCommand(
+        "DONUT", lambda msp: msp.add_lwpolyline(rows, format="xyseb", close=True))
