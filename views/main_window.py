@@ -3390,16 +3390,17 @@ class MainWindow(QMainWindow):
     def _vp_placement(self, vp):
         """Where this viewport puts the model, or None if a matrix cannot say.
 
-        A twisted viewport or one with its own frozen layers is not a plain
-        scale-and-shift of the model, and a clipped one is not a rectangle:
-        those keep the baked path, which renders them properly.
+        A viewport with its own frozen layers is not the model as it is,
+        and a shaped clipping boundary is not a rectangle: those keep the
+        baked path, which renders them properly. A twisted view is a turn
+        the matrix makes (Planos Constructivos' A-01 has one at 60°, and
+        one viewport that cannot go live keeps the whole sheet on the bake:
+        every pan tick inside any of them re-baked the sheet).
         """
         from core import layouts as layout_ops
 
         try:
             if getattr(vp, "frozen_layers", None):
-                return None
-            if layout_ops.viewport_twist(vp):
                 return None
             clip = layout_ops.viewport_clip(vp)
             if clip is False:

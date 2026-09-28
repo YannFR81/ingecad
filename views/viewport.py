@@ -1182,17 +1182,24 @@ class Viewport(QOpenGLWidget):
         gl.glScissor(px, int(self.height() * dpr) - py - ph, pw, ph)
         ox, oy = scene.origin
         factor = live["factor"]
-        mvp = self._mvp_about(ox, oy, live["base"], 0.0, factor,
+        angle = live.get("angle", 0.0) or 0.0
+        mvp = self._mvp_about(ox, oy, live["base"], angle, factor,
                               live["offset"][0], live["offset"][1])
         # Only what this viewport shows: the model rectangle behind its
-        # frame (the placement inverted, grown a little), against the
-        # batches' world bounds. A real sheet shows 0.5-18 % of the model
-        # per viewport, and drawing all of it for each of eleven viewports
-        # cost 13 ms a frame against 4 for the baked sheet.
+        # frame (the placement inverted -- turned back by the view twist --
+        # and grown a little), against the batches' world bounds. A real
+        # sheet shows 0.5-18 % of the model per viewport, and drawing all
+        # of it for each of eleven viewports cost 13 ms a frame against 4
+        # for the baked sheet.
         bx, by = live["base"]
         dx, dy = live["offset"]
-        mx0, my0 = bx + (x0 - dx - bx) / factor, by + (y0 - dy - by) / factor
-        mx1, my1 = bx + (x1 - dx - bx) / factor, by + (y1 - dy - by) / factor
+        cos_a, sin_a = math.cos(math.radians(-angle)), math.sin(math.radians(-angle))
+        xs, ys = [], []
+        for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
+            ux, uy = (px - dx - bx) / factor, (py - dy - by) / factor
+            xs.append(bx + ux * cos_a - uy * sin_a)
+            ys.append(by + ux * sin_a + uy * cos_a)
+        mx0, my0, mx1, my1 = min(xs), min(ys), max(xs), max(ys)
         margin = 0.02 * max(mx1 - mx0, my1 - my0)
         model_rect = (mx0 - margin, my0 - margin, mx1 + margin, my1 + margin)
         px_per_unit = self.view.scale * factor

@@ -136,8 +136,18 @@ def test_a_full_turn_of_twist_is_no_twist(win):
     assert win.viewport._live_vp is not None
     vp.dxf.view_twist_angle = 15.0
     assert viewport_twist(vp) == 15.0
-    win._vp_live_stop()
-    assert win._vp_live_draw() is False                 # a real twist: the bake
+
+
+def test_a_twisted_viewport_pans_live_too(win):
+    """Planos Constructivos' A-01 has a 60° viewport; one viewport that
+    cannot go live keeps the whole sheet on the bake, so every pan tick
+    inside ANY of its viewports re-baked the sheet (Marco: "hablo dentro
+    del viewport"). The live matrix turns, as model_to_paper does."""
+    _psp, vp = _sheet(win, dangling=True)
+    vp.dxf.view_twist_angle = 60.0
+    assert _drag(win, vp) == 0
+    live = win.viewport._live_vp[0]
+    assert live["angle"] == pytest.approx(60.0)
 
 
 def test_dragging_right_after_the_double_click_never_freezes_or_regens(win):
@@ -351,3 +361,75 @@ def test_navigating_inside_a_viewport_re_bakes_the_sheet_only_on_leaving(win):
     win._deactivate_viewport()                         # PSPACE: now the sheet re-bakes
     assert fired == [1]
     assert not win._vp_sheet_stale
+
+
+def test_a_twisted_viewport_draws_the_same_live_as_baked(qapp):
+    """Pixels: a line through a 60° viewport, baked against live at the
+    same view. Needs a real GL context."""
+    import numpy as np
+    from PySide6.QtGui import QGuiApplication, QImage
+    from PySide6.QtTest import QTest
+
+    if QGuiApplication.platformName() in ("offscreen", "minimal"):
+        pytest.skip("no OpenGL on this platform: the pixels need a real context")
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document("mm")
+    win.resize(1000, 700)
+    win.show()
+    QTest.qWaitForWindowExposed(win, 5000)
+    try:
+        doc = win.document
+        msp = doc.modelspace()
+        msp.add_line((0, 0), (5000, 0))
+        msp.add_line((0, 0), (0, 3000))
+        msp.add_circle((3000, 1500), 800)
+        psp = doc.doc.layouts.get("Layout1")
+        vp = psp.add_viewport(center=(150, 100), size=(160, 100),
+                              view_center_point=(2500, 1500), view_height=5000)
+        vp.dxf.view_twist_angle = 60.0
+        win.switch_layout("Layout1")
+
+        def wait():
+            import time
+            t = time.monotonic()
+            while time.monotonic() - t < 60:
+                qapp.processEvents()
+                live = getattr(win, "_vp_live_worker", None)
+                if (win._regen_worker is None and not win.tools._warmers
+                        and not (live is not None and live.isRunning())):
+                    break
+            for _ in range(5):
+                qapp.processEvents()
+
+        def ink():
+            win.viewport.grabFramebuffer()
+            img = win.viewport.grabFramebuffer().convertToFormat(QImage.Format_RGB888)
+            a = np.frombuffer(img.constBits(), np.uint8).reshape(
+                img.height(), img.bytesPerLine())[:, :img.width() * 3]
+            a = a.reshape(img.height(), img.width(), 3).astype(int)
+            return np.all(a < 80, axis=2)                  # black on paper
+
+        wait()
+        win.viewport.zoom_extents()
+        wait()
+        baked = ink()
+        win._activate_viewport(vp)
+        wait()
+        assert win.vp_view_pan(0.0, 0.0) is True
+        wait()
+        assert win.viewport._live_vp is not None
+        live = ink()
+        # the active-viewport frame is drawn heavier live: compare inside it
+        x0, y0 = win.viewport.view.world_to_screen(75, 55)
+        x1, y1 = win.viewport.view.world_to_screen(225, 145)
+        dpr = live.shape[0] / win.viewport.height()
+        sl = (slice(int(y1 * dpr), int(y0 * dpr)), slice(int(x0 * dpr), int(x1 * dpr)))
+        b, l = baked[sl], live[sl]
+        assert b.sum() > 200, "the baked viewport shows the model"
+        differing = (b != l).sum()
+        assert differing < 0.05 * b.sum(), f"{differing} px differ of {b.sum()} ink"
+    finally:
+        win.document.dirty = False
+        win.close()

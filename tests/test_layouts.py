@@ -1239,8 +1239,13 @@ def test_live_navigation_keeps_every_viewport_drawn(qapp):
 
 
 def test_a_viewport_a_matrix_cannot_reproduce_keeps_the_bake(qapp):
-    """A twisted viewport is not a scale-and-shift of the model, so the
-    whole sheet stays on the rebuild path rather than being drawn wrong."""
+    """A shaped clipping boundary is not a rectangle the live scissor can
+    cut, so the whole sheet stays on the rebuild path rather than being
+    drawn wrong. A twist is a turn the matrix makes (it used to keep the
+    sheet on the bake too, and A-01's 60° viewport made every pan tick a
+    regen)."""
+    from ezdxf.lldxf import const
+
     from views.main_window import MainWindow
 
     win = MainWindow()
@@ -1256,6 +1261,12 @@ def test_a_viewport_a_matrix_cannot_reproduce_keeps_the_bake(qapp):
         assert win._vp_placement(vp) is not None
 
         vp.dxf.view_twist_angle = 30.0
+        assert win._vp_placement(vp)["angle"] == pytest.approx(30.0)
+
+        shape = psp.add_lwpolyline([(40, 30), (160, 30), (170, 70), (160, 110),
+                                    (40, 110), (30, 70)], close=True)
+        vp.dxf.flags |= const.VSF_NON_RECTANGULAR_CLIPPING
+        vp.dxf.clipping_boundary_handle = shape.dxf.handle
         assert win._vp_placement(vp) is None
         assert win._vp_live_draw() is False
     finally:

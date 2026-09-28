@@ -65,6 +65,10 @@
   the same as panning the paper. The model for the live view is now
   prepared as soon as the sheet tab is shown, so the double-click finds
   it ready.
+- **A twisted viewport navigates live too.** One viewport with a view
+  twist kept the whole sheet on the slow path -- every pan tick inside
+  any viewport of Planos Constructivos' A-01 (one at 60°) re-baked the
+  sheet. The live matrix now turns as the bake does.
 - **Zooming and panning inside a viewport no longer re-bakes the sheet
   after every burst.** Each pause used to rebuild the whole sheet (a full
   regen per pause, twelve in a minute of zooming on a real sheet) while
