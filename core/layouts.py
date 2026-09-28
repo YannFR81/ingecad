@@ -599,6 +599,43 @@ def viewport_rect(vp) -> tuple[float, float, float, float]:
     return (cx - hw, cy - hh, cx + hw, cy + hh)
 
 
+def viewport_clip(vp):
+    """What clips this viewport's content, as ezdxf draws it.
+
+    ``None``: the frame (no clipping, or a boundary handle that points at
+    nothing -- LibreDWG leaves those dangling on most real sheets, and
+    ezdxf falls back to the frame for them, so the live navigation must
+    too: it used to take the handle at its word and re-bake the sheet on
+    every mouse move). A ``(x0, y0, x1, y1)`` rectangle: the boundary is an
+    axis-aligned rectangle, and clipping to it is a scissor like the
+    frame's. ``False``: a real shape, which only the baked path renders.
+    """
+    try:
+        if not vp.has_extended_clipping_path:
+            return None
+        boundary = vp.doc.entitydb.get(vp.dxf.clipping_boundary_handle) if vp.doc else None
+    except Exception:
+        return None
+    if boundary is None:
+        return None
+    if boundary.dxftype() != "LWPOLYLINE":
+        return False
+    try:
+        points = [(float(x), float(y)) for x, y in boundary.get_points("xy")]
+        if any(abs(float(b[0])) > 1e-12 for b in boundary.get_points("b")):
+            return False             # an arc segment: not a rectangle
+    except Exception:
+        return False
+    if len(points) == 5 and points[0] == points[-1]:
+        points = points[:-1]
+    if len(points) != 4:
+        return False
+    xs, ys = sorted({round(x, 9) for x, _y in points}), sorted({round(y, 9) for _x, y in points})
+    if len(xs) != 2 or len(ys) != 2:
+        return False
+    return (xs[0], ys[0], xs[1], ys[1])
+
+
 # -- the projection: paper <-> model through a viewport --------------------------
 #
 # A floating viewport shows the model at a scale, around a view centre, and
@@ -611,8 +648,18 @@ def viewport_rect(vp) -> tuple[float, float, float, float]:
 #     model = R(-twist) * (paper - centre) / scale + view_centre
 
 
+def viewport_twist(vp) -> float:
+    """The view twist in degrees, normalised to (-180, 180]: a real sheet
+    carried 720, a full turn that is no turn -- and had the live
+    navigation refuse the whole sheet for it."""
+    twist = float(vp.dxf.get("view_twist_angle", 0.0) or 0.0) % 360.0
+    if twist > 180.0:
+        twist -= 360.0
+    return 0.0 if abs(twist) < 1e-9 else twist
+
+
 def _twist_radians(vp) -> float:
-    return math.radians(float(vp.dxf.get("view_twist_angle", 0.0) or 0.0))
+    return math.radians(viewport_twist(vp))
 
 
 def _target_xy(vp) -> tuple[float, float]:

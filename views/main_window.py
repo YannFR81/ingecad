@@ -115,6 +115,35 @@ class RegenWorker(QThread):
         self.done.emit(self._document, scene, self._revision, self._layout)
 
 
+class _LiveSceneWorker(QThread):
+    """The model tessellated for live navigation inside a viewport, off the
+    UI thread: on a real plan the first pan tick built it synchronously
+    (5.8 s frozen, Planos Constructivos). It starts when the viewport is
+    activated, so by the time the user drags it is usually ready."""
+
+    done = Signal(object, object)          # key, scene | None
+
+    def __init__(self, document: Document, layout_name: str, key) -> None:
+        super().__init__()
+        self.setObjectName("vp-live")
+        self._document = document
+        self._layout_name = layout_name
+        self._key = key
+
+    def run(self) -> None:
+        from core import gc_guard
+
+        with gc_guard.paused():      # never collect Qt garbage off the GUI thread
+            from render.backend import build_scene
+
+            try:
+                sheet = self._document.doc.layouts.get(self._layout_name)
+                scene = build_scene(self._document, "Model", canvas=sheet)
+            except Exception:                 # noqa: BLE001 - the sync path will say
+                scene = None
+            self.done.emit(self._key, scene)
+
+
 class _AutoSaveWorker(QThread):
     """Writes the drawing to its .sv$ file off the UI thread.
 
@@ -3072,6 +3101,7 @@ class MainWindow(QMainWindow):
         self.viewport.space_placement = placement
         self.tools.space_changed()        # index, snap and tolerance are the
         self.viewport.update()            # model's now, not the sheet's
+        self._vp_warm_live_scene()
         label = layout_ops.scale_label(layout_ops.viewport_scale(vp))
         if layout_ops.is_viewport_locked(vp):
             self.command_line.echo(
@@ -3176,6 +3206,12 @@ class MainWindow(QMainWindow):
         regen when the gesture settles.
         """
         if self._vp_live_draw():
+            return
+        worker = getattr(self, "_vp_live_worker", None)
+        if worker is not None and worker.isRunning():
+            # the live scene is on its way (a second or two): the display
+            # catches up when it lands, and the gesture's commit regens
+            # once -- not a full sheet regen per mouse move meanwhile
             return
         # No model scene yet (still building, or the drawing changed under
         # it): fall back to the old rebuild so the view still tracks.
@@ -3303,6 +3339,9 @@ class MainWindow(QMainWindow):
         key = (self.document, self._active_layout)
         if cached is not None and cached[0] == key:
             return cached[1]
+        worker = getattr(self, "_vp_live_worker", None)
+        if worker is not None and worker.isRunning():
+            return None                   # being built: this tick waits
         from render.backend import build_scene
 
         try:
@@ -3312,6 +3351,33 @@ class MainWindow(QMainWindow):
             return None
         self._vp_model_cache = (key, scene)
         return scene
+
+    def _vp_warm_live_scene(self) -> None:
+        """Start building the live model scene in the background, unless
+        it is cached or already being built."""
+        if self.document is None:
+            return
+        key = (self.document, self._active_layout)
+        cached = getattr(self, "_vp_model_cache", None)
+        if cached is not None and cached[0] == key:
+            return
+        worker = getattr(self, "_vp_live_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        worker = _LiveSceneWorker(self.document, self._active_layout, key)
+        worker.done.connect(self._on_live_scene_done)
+        self._vp_live_worker = worker
+        worker.start()
+
+    def _on_live_scene_done(self, key, scene) -> None:
+        if scene is None or key != (self.document, self._active_layout):
+            return
+        if getattr(self, "_vp_model_cache", None) is None:
+            self._vp_model_cache = (key, scene)
+        # a drag already under way: catch the display up to the cursor
+        if self._vp_gesture is not None and self._active_vp is not None:
+            if self._vp_live_draw():
+                self.viewport.update()
 
     def _vp_placement(self, vp):
         """Where this viewport puts the model, or None if a matrix cannot say.
@@ -3325,10 +3391,11 @@ class MainWindow(QMainWindow):
         try:
             if getattr(vp, "frozen_layers", None):
                 return None
-            if float(vp.dxf.get("view_twist_angle", 0.0)):
+            if layout_ops.viewport_twist(vp):
                 return None
-            if vp.dxf.get("clipping_boundary_handle", None):
-                return None
+            clip = layout_ops.viewport_clip(vp)
+            if clip is False:
+                return None          # a shaped boundary: only the bake clips it
         except Exception:
             return None
         # The live model is tessellated once, at model space's annotation
@@ -3342,7 +3409,13 @@ class MainWindow(QMainWindow):
             if shown is not None and shown != annotative.current_scale(doc):
                 return None
         # past those, the placement IS the projection MSPACE edits through
-        return layout_ops.viewport_placement(vp)
+        placement = layout_ops.viewport_placement(vp)
+        if placement is not None and clip is not None:
+            # a rectangular boundary: scissor to it, within the frame
+            x0, y0, x1, y1 = placement["rect"]
+            placement["rect"] = (max(x0, clip[0]), max(y0, clip[1]),
+                                 min(x1, clip[2]), min(y1, clip[3]))
+        return placement
 
     def _model_annotative(self) -> bool:
         """Does model space hold any annotative object? Cached per revision:
@@ -4598,6 +4671,13 @@ class MainWindow(QMainWindow):
         saving = getattr(self, "_save_worker", None)
         if saving is not None:
             saving.wait()
+        live = getattr(self, "_vp_live_worker", None)
+        if live is not None:
+            try:
+                live.done.disconnect(self._on_live_scene_done)
+            except (RuntimeError, TypeError):
+                pass
+            live.wait()
         worker = self._regen_worker
         if worker is not None:
             self._regen_worker = None

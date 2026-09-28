@@ -105,15 +105,18 @@ def split(costs: list[tuple[str, int]], parts: int) -> list[frozenset]:
 
 
 def draw_parallel(make_frontend, layout, *, min_cost: int = MIN_COST,
-                  processes: Optional[int] = None):
+                  processes: Optional[int] = None, layout_properties=None):
     """Draw ``layout`` on several processes; the merged ``VertexBackend``
     and the skipped-entity notes -- or None, and the caller draws serially.
 
     ``make_frontend()`` builds a fresh (frontend, backend) pair, exactly as
     the serial regen does; it is called in each worker after the fork.
+    ``layout_properties`` overrides the layout's own, as draw_layout takes
+    it (the model resolved against the sheet it will be shown through).
     """
     return _fork_and_merge(make_frontend, layout, min_cost, processes,
-                           lambda index, share: (layout, share, None, True),
+                           lambda index, share: (layout, share, None, True,
+                                                 layout_properties),
                            per_worker=SHARES_PER_WORKER)
 
 
@@ -147,16 +150,17 @@ def _fork_and_merge(make_frontend, model, min_cost, processes, plan,
     jobs = [plan(index, share) for index, share in enumerate(shares)]
 
     def work(number):
-        layout, only, model_share, paper = jobs[number]
+        layout, only, model_share, paper, properties = jobs[number]
         if model_share is not None:
             _viewports_see_only(model_share)
         frontend, backend = make_frontend()
         frontend._model_share = model_share
         frontend._draws_paper = paper
         if only is not None:
-            frontend.draw_layout(layout, filter_func=lambda e: e.dxf.handle in only)
+            frontend.draw_layout(layout, filter_func=lambda e: e.dxf.handle in only,
+                                 layout_properties=properties)
         else:
-            frontend.draw_layout(layout)
+            frontend.draw_layout(layout, layout_properties=properties)
         return backend.buckets, backend.images, backend.background, list(frontend.skipped)
 
     import multiprocessing
@@ -227,7 +231,8 @@ def draw_sheet_parallel(make_frontend, layout, *, min_cost: int = MIN_COST,
         return None
     # one run per worker: each run pays for setting up every viewport
     return _fork_and_merge(make_frontend, doc.modelspace(), min_cost, processes,
-                           lambda index, share: (layout, None, share, index == 0),
+                           lambda index, share: (layout, None, share, index == 0,
+                                                 None),
                            per_worker=1)
 
 

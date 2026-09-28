@@ -58,6 +58,13 @@ def _window_in_mspace(qapp):
     _wait_regen(qapp, win)
     win._activate_viewport(vp)
     _wait_regen(qapp, win)
+    # the activation builds the live model in the background; the user
+    # looks for a moment before dragging, and so does this
+    live = getattr(win, "_vp_live_worker", None)
+    if live is not None:
+        live.wait()
+    for _ in range(5):
+        qapp.processEvents()
     assert win.viewport._live_vp is None
     assert _visible_vertices(win) > 8, "the sheet shows the circle"
     return win, vp

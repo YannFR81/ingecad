@@ -1195,7 +1195,9 @@ def build_scene(document: Document, layout_name: str | None = None, *,
     groups = order_groups(layout)
     hidden = frozenset(hidden_handles(document))
     # block references replay a recording of their block: the model only
-    instancing = (canvas is None and layout_name is None and layout.is_modelspace
+    # (through a sheet's viewports too: the recording keys on the resolved
+    # colours, which then are the paper's)
+    instancing = (layout_name is None and layout.is_modelspace
                   and os.environ.get("INGECAD_NO_INSTANCING", "") not in ("1", "true"))
 
     def make_frontend():
@@ -1209,11 +1211,17 @@ def build_scene(document: Document, layout_name: str | None = None, *,
         return frontend, backend
 
     parallel = None
-    if canvas is None and layout_name is None and layout.is_modelspace:
+    if layout_name is None and layout.is_modelspace:
         from render import parallel as _parallel
 
-        parallel = _parallel.draw_parallel(make_frontend, layout)
-    elif canvas is None and layout_name is not None:
+        properties = None
+        if canvas is not None:
+            from ezdxf.addons.drawing.properties import LayoutProperties
+
+            properties = LayoutProperties.from_layout(canvas)
+        parallel = _parallel.draw_parallel(make_frontend, layout,
+                                           layout_properties=properties)
+    elif layout_name is not None:
         from render import parallel as _parallel
 
         parallel = _parallel.draw_sheet_parallel(make_frontend, layout)

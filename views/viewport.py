@@ -402,7 +402,13 @@ class Viewport(QOpenGLWidget):
         whose baked copy of that content is hidden while this is on.
         """
         self._live_vp = live
-        self._live_vp_dirty = True
+        # The buffers hold the model scene the placements share: uploaded
+        # once per scene, kept across ticks AND across gestures (each pan
+        # used to start with 150-220 ms of re-upload), dropped when a
+        # different scene comes.
+        scene_id = id(live[0]["scene"]) if live else None
+        if scene_id is not None and scene_id != getattr(self, "_live_vp_scene_id", None):
+            self._live_vp_dirty = True
         self.update()
 
     def hide_handles(self, handles) -> None:
@@ -608,7 +614,8 @@ class Viewport(QOpenGLWidget):
         try:
             holders = [self._scene_bufs, self._paper_bufs,
                        self._overlay_bufs, self._preview_bufs,
-                       self._ghost_bufs]
+                       self._ghost_bufs,
+                       getattr(self, "_live_vp_bufs", None) or {}]
             for bufs in holders:
                 for vao, vbo, *_ in bufs.values():
                     vbo.destroy()
@@ -1140,6 +1147,7 @@ class Viewport(QOpenGLWidget):
                 self._live_vp_bufs["thick"] = self._make_thick_vao(
                     scene.thick.data)
             self._live_vp_dirty = False
+            self._live_vp_scene_id = id(scene)
         if not self._live_vp_bufs:
             return
 
@@ -1161,8 +1169,21 @@ class Viewport(QOpenGLWidget):
             return
         gl.glScissor(px, int(self.height() * dpr) - py - ph, pw, ph)
         ox, oy = scene.origin
-        mvp = self._mvp_about(ox, oy, live["base"], 0.0, live["factor"],
+        factor = live["factor"]
+        mvp = self._mvp_about(ox, oy, live["base"], 0.0, factor,
                               live["offset"][0], live["offset"][1])
+        # Only what this viewport shows: the model rectangle behind its
+        # frame (the placement inverted, grown a little), against the
+        # batches' world bounds. A real sheet shows 0.5-18 % of the model
+        # per viewport, and drawing all of it for each of eleven viewports
+        # cost 13 ms a frame against 4 for the baked sheet.
+        bx, by = live["base"]
+        dx, dy = live["offset"]
+        mx0, my0 = bx + (x0 - dx - bx) / factor, by + (y0 - dy - by) / factor
+        mx1, my1 = bx + (x1 - dx - bx) / factor, by + (y1 - dy - by) / factor
+        margin = 0.02 * max(mx1 - mx0, my1 - my0)
+        model_rect = (mx0 - margin, my0 - margin, mx1 + margin, my1 + margin)
+        px_per_unit = self.view.scale * factor
         self._program.bind()
         self._program.setUniformValue(self._loc_mvp, mvp)
         for name, mode in (("triangles", GL_TRIANGLES), ("lines", GL_LINES),
@@ -1170,12 +1191,15 @@ class Viewport(QOpenGLWidget):
             buf = self._live_vp_bufs.get(name)
             if buf is None:
                 continue
-            vao, _vbo, count = buf
+            vao, _vbo, _count = buf
+            batch: Batch = getattr(scene, name)
             vao.bind()
-            gl.glDrawArrays(mode, 0, count)
+            for first, count in batch.visible_runs(
+                    model_rect, px_per_unit, MIN_TEXT_PX):
+                gl.glDrawArrays(mode, first, count)
             vao.release()
         self._program.release()
-        self._draw_thick(gl, mvp, None, self._live_vp_bufs.get("thick"),
+        self._draw_thick(gl, mvp, model_rect, self._live_vp_bufs.get("thick"),
                          scene.thick)
 
     def _upload_overlay(self) -> None:
