@@ -325,7 +325,13 @@ CONTEXT_CLASSES = {
     "TEXT": ("ACDB_TEXTOBJECTCONTEXTDATA_CLASS", "AcDbTextObjectContextData"),
     "MTEXT": ("ACDB_MTEXTOBJECTCONTEXTDATA_CLASS",
               "AcDbMTextObjectContextData"),
+    # linear (rotated) and aligned dimensions share AutoCAD's "AlDim" class
+    # (measured on file G: docs/reference/annotative, 2.3)
+    "DIMENSION": ("ACDB_ALDIMOBJECTCONTEXTDATA_CLASS",
+                  "AcDbAlignedDimensionObjectContextData"),
 }
+#: dimension types (dimtype & 7) whose representation body is measured
+_DIM_TYPES_WITH_CONTEXT = (0, 1)
 #: CLASS flags AutoCAD writes for SCALE and every context class (measured)
 _CLASS_FLAGS = 1153
 
@@ -350,7 +356,15 @@ def _new_object(doc, dxftype: str, owner: str, subclasses: list[list]):
 
     lines = [(0, dxftype)]
     for sub in subclasses:
-        lines.extend(sub)
+        for code, value in sub:
+            # tags read back from an object hold points as tuples/vectors:
+            # write them out as the x/y/z groups they came from
+            if isinstance(value, (tuple, list)) or hasattr(value, "xyz"):
+                parts = list(value.xyz) if hasattr(value, "xyz") else list(value)
+                for offset, part in enumerate(parts[:3]):
+                    lines.append((code + 10 * offset, repr(float(part))))
+            else:
+                lines.append((code, value))
     text = "".join(f"{c}\n{v}\n" for c, v in lines)
     obj = DXFTagStorage.load(ExtendedTags.from_text(text), doc)
     doc.entitydb.add(obj)           # assigns the handle
@@ -433,7 +447,28 @@ def _body_for(entity) -> list:
                 (11, repr(ins[0])), (21, repr(ins[1])), (31, repr(ins[2])),
                 (40, repr(float(entity.dxf.get("width", 0.0)))),
                 (41, "0.0"), (42, "0.0"), (43, "0.0"), (71, 0)]
+    if dxftype == "DIMENSION" and (entity.dimtype & 7) in _DIM_TYPES_WITH_CONTEXT:
+        mid = entity.dxf.get("text_midpoint", (0.0, 0.0, 0.0))
+        defpoint = entity.dxf.get("defpoint", (0.0, 0.0, 0.0))
+        # the measured body: the *D block of this scale, then the dimension's
+        # text placement, then the aligned subclass with the line's defpoint
+        return [(100, "AcDbDimensionObjectContextData"),
+                (2, entity.dxf.get("geometry", "")), (293, 0),
+                (10, repr(float(mid[0]))), (20, repr(float(mid[1]))),
+                (294, 1), (140, "0.0"), (298, 0), (291, 0), (70, 1),
+                (292, 0), (71, 0), (280, 31), (295, 0), (296, 0), (297, 0),
+                (100, "AcDbAlignedDimensionObjectContextData"),
+                (11, repr(float(defpoint[0]))), (21, repr(float(defpoint[1]))),
+                (31, repr(float(defpoint[2]) if len(defpoint) > 2 else 0.0))]
     raise ValueError(f"{dxftype} cannot carry scale representations yet")
+
+
+def supports_representation(entity) -> bool:
+    """Can :func:`add_representation` write a body for this entity?"""
+    dxftype = entity.dxftype()
+    if dxftype in ("TEXT", "MTEXT"):
+        return True
+    return dxftype == "DIMENSION" and (entity.dimtype & 7) in _DIM_TYPES_WITH_CONTEXT
 
 
 def add_representation(entity, scale: Scale, *, default: bool,
@@ -480,3 +515,300 @@ def _point(value, fallback):
         return (float(value.x), float(value.y), float(value.z))
     except AttributeError:
         return fallback
+
+
+# -- creating annotative objects (A2) -------------------------------------------
+
+from core.commands import Command  # noqa: E402  (the reader above is import-light)
+
+
+def default_scale(doc) -> Scale:
+    """1:1, added to the scale list when the drawing has none."""
+    return ensure_scale(doc, "1:1", 1.0, 1.0)
+
+
+def scale_or_default(doc) -> Scale:
+    """CANNOSCALE, or 1:1 when the drawing never set one."""
+    return current_scale(doc) or default_scale(doc)
+
+
+def creation_scale(document) -> Scale:
+    """The annotation scale a NEW object of the current space is born with:
+    model space's CANNOSCALE (1:1 when unset); the sheet itself is paper, so
+    1:1; a block open in the Block Editor follows CANNOSCALE too."""
+    doc = document.doc
+    space = document.current_space()
+    if getattr(space, "is_any_paperspace", False):
+        return default_scale(doc)
+    return scale_or_default(doc)
+
+
+def style_is_annotative(document, table: str, name: str) -> bool:
+    """Is the text style (``table`` = "styles") or dimension style
+    ("dimstyles") annotative? The flag rides the table entry's XDATA, as on
+    any object (the acad(iso).dwt "Annotative" styles carry it)."""
+    entries = getattr(document.doc, table)
+    if name not in entries:
+        return False
+    return is_annotative(entries.get(name))
+
+
+def set_style_annotative(entry, on: bool) -> None:
+    """Flag a STYLE / DIMSTYLE table entry. An annotative dimension style
+    also forces DIMSCALE to 0 (p. 2249): CANNOSCALE sizes its dimensions."""
+    set_annotative(entry, on)
+    if on and entry.dxftype() == "DIMSTYLE":
+        entry.dxf.dimscale = 0.0
+
+
+def remove_representations(entity) -> None:
+    """Drop every context object of ``entity`` (before deleting it: ezdxf's
+    delete leaves those of a file's own, soft-owned managers orphaned in
+    OBJECTS, measured). Deleting the manager takes its hard-owned scale
+    dictionary and context objects with it."""
+    manager = _xdict_get(entity, CONTEXT_MANAGER_KEY)
+    if manager is None:
+        return
+    try:
+        entity.get_extension_dict().discard(CONTEXT_MANAGER_KEY)
+    except Exception:                            # noqa: BLE001
+        pass
+    if manager.is_alive:
+        scales = manager[SCALES_KEY] if SCALES_KEY in manager else None
+        doc = entity.doc
+        try:
+            doc.objects.delete_entity(manager)
+        except Exception:                        # noqa: BLE001
+            pass
+        # a soft-owned scale dictionary (a colleague's file) survives that
+        if scales is not None and scales.is_alive:
+            for _key, obj in list(scales.items()):
+                if obj is not None and obj.is_alive:
+                    try:
+                        doc.objects.delete_entity(obj)
+                    except Exception:            # noqa: BLE001
+                        pass
+            try:
+                doc.objects.delete_entity(scales)
+            except Exception:                    # noqa: BLE001
+                pass
+
+
+def remove_representation(entity, scale: Scale):
+    """Take the representation for ``scale`` off the entity. Returns what
+    :func:`restore_representation` needs, or None when the entity does not
+    carry that scale. The default one cannot go (OBJECTSCALE: "The current
+    scale or scales referenced by objects or views cannot be deleted")."""
+    manager = _xdict_get(entity, CONTEXT_MANAGER_KEY)
+    if manager is None or SCALES_KEY not in manager:
+        return None
+    scales = manager[SCALES_KEY]
+    doc = entity.doc
+    for key, obj in list(scales.items()):
+        subs = _subclass_tags(obj)
+        handle = next((v for sub in subs for c, v in sub if c == 340), None)
+        if handle != scale.handle:
+            continue
+        is_default = any(c == 290 and bool(v) for sub in subs for c, v in sub)
+        if is_default:
+            return None
+        saved = [sub for sub in subs[1:]]
+        dxftype = obj.dxftype()
+        del scales[key]                  # a hard-owned entry: this deletes it
+        if obj.is_alive:
+            try:
+                doc.objects.delete_entity(obj)
+            except Exception:            # noqa: BLE001 - already gone
+                pass
+        return (dxftype, saved)
+    return None
+
+
+def restore_representation(entity, saved) -> None:
+    """Put back what :func:`remove_representation` took (undo)."""
+    dxftype, subclasses = saved
+    manager = _xdict_get(entity, CONTEXT_MANAGER_KEY)
+    if manager is None or SCALES_KEY not in manager:
+        return
+    scales = manager[SCALES_KEY]
+    obj = _new_object(entity.doc, dxftype, scales.dxf.handle, subclasses)
+    key = f"*A{len(scales) + 1}"
+    while key in scales:
+        key = f"*A{int(key[2:]) + 1}"
+    scales[key] = obj
+
+
+def has_scale(entity, scale: Scale) -> bool:
+    return any(r.scale.handle == scale.handle for r in representations(entity))
+
+
+def annotate_new_entity(document, entity, paper_height: Optional[float] = None) -> bool:
+    """A TEXT/MTEXT just created: when its text style is annotative, make it
+    annotative at the current annotation scale -- its typed height is a
+    PAPER height, so the model height is that times the scale's factor, and
+    it gets its one (default) representation. True when it did."""
+    dxftype = entity.dxftype()
+    if dxftype not in ("TEXT", "MTEXT"):
+        return False
+    style = entity.dxf.get("style", "Standard")
+    if not style_is_annotative(document, "styles", style):
+        return False
+    scale = creation_scale(document)
+    field_name = "height" if dxftype == "TEXT" else "char_height"
+    paper = float(paper_height if paper_height is not None
+                  else entity.dxf.get(field_name, 0.0))
+    entity.dxf.set(field_name, paper * scale.factor)
+    if dxftype == "MTEXT" and entity.dxf.hasattr("width"):
+        entity.dxf.width = float(entity.dxf.width) * scale.factor
+    add_representation(entity, scale, default=True)
+    return True
+
+
+def annotate_new_dimension(document, dim, scale: Scale) -> None:
+    """A dimension just rendered under an annotative style: the flag and,
+    for the linear/aligned kinds, its default representation."""
+    if supports_representation(dim):
+        add_representation(dim, scale, default=True)
+    else:
+        set_annotative(dim, True)
+
+
+def entities_supporting(space, scale: Scale) -> list:
+    """The annotative objects of ``space`` that carry ``scale``."""
+    return [e for e in space if is_annotative(e) and has_scale(e, scale)]
+
+
+class SetAnnotationScaleCommand(Command):
+    """CANNOSCALE (model space) or a layout viewport's own annotation scale,
+    as one undo step; with ANNOAUTOSCALE on, the objects of that space that
+    support the scale being left gain the new one (they keep their place)."""
+
+    name = "CANNOSCALE"
+    needs_regen = True
+
+    def __init__(self, scale_name: str, viewport=None, autoscale: bool = False) -> None:
+        self.scale_name = scale_name
+        self.viewport = viewport
+        self.autoscale = autoscale
+        self._old: Optional[str] = None
+        self._added: list = []
+
+    def do(self, document) -> None:
+        doc = document.doc
+        scale = find_scale(doc, self.scale_name)
+        if scale is None:
+            raise ValueError(f"no scale named {self.scale_name!r} in the drawing")
+        self._added = []
+        if self.viewport is not None:
+            old = viewport_scale(self.viewport)
+            self._old = old.name if old else None
+            set_viewport_scale(self.viewport, scale)
+        else:
+            old = current_scale(doc)
+            self._old = old.name if old else None
+            set_current_scale(doc, scale)
+        if self.autoscale and old is not None and old.handle != scale.handle:
+            space = doc.modelspace()
+            for entity in entities_supporting(space, old):
+                if not has_scale(entity, scale) and supports_representation(entity):
+                    add_representation(entity, scale, default=False)
+                    self._added.append(entity)
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        doc = document.doc
+        scale = find_scale(doc, self.scale_name)
+        for entity in self._added:
+            if entity.is_alive and scale is not None:
+                remove_representation(entity, scale)
+        self._added = []
+        old = find_scale(doc, self._old) if self._old else None
+        if self.viewport is not None:
+            if old is not None:
+                set_viewport_scale(self.viewport, old)
+            elif self.viewport.has_extension_dict:
+                xdict = self.viewport.get_extension_dict()
+                if SCALE_INFO_KEY in xdict:
+                    record = xdict[SCALE_INFO_KEY]
+                    xdict.discard(SCALE_INFO_KEY)
+                    try:
+                        doc.objects.delete_entity(record)
+                    except Exception:            # noqa: BLE001
+                        pass
+        else:
+            if old is not None:
+                set_current_scale(doc, old)
+            else:
+                variables = doc.rootdict.get("AcDbVariableDictionary")
+                if variables is not None and "CANNOSCALE" in variables:
+                    variables.discard("CANNOSCALE")
+        document.dirty = True
+
+
+class ObjectScaleCommand(Command):
+    """OBJECTSCALE Add / Delete on a selection, one undo step."""
+
+    name = "OBJECTSCALE"
+    needs_regen = True
+
+    def __init__(self, entities: list, scale_name: str, add: bool) -> None:
+        self.entities = [e for e in entities if is_annotative(e)]
+        self.scale_name = scale_name
+        self.add = add
+        self._done: list = []      # (entity, saved) for Delete; entities for Add
+        self.skipped = 0
+
+    def do(self, document) -> None:
+        scale = find_scale(document.doc, self.scale_name)
+        if scale is None:
+            raise ValueError(f"no scale named {self.scale_name!r} in the drawing")
+        self._done = []
+        self.skipped = 0
+        for entity in self.entities:
+            if self.add:
+                if has_scale(entity, scale) or not supports_representation(entity):
+                    self.skipped += 1
+                    continue
+                add_representation(entity, scale, default=False)
+                self._done.append((entity, None))
+            else:
+                saved = remove_representation(entity, scale)
+                if saved is None:
+                    self.skipped += 1
+                    continue
+                self._done.append((entity, saved))
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        scale = find_scale(document.doc, self.scale_name)
+        for entity, saved in reversed(self._done):
+            if not entity.is_alive:
+                continue
+            if self.add:
+                if scale is not None:
+                    remove_representation(entity, scale)
+            else:
+                restore_representation(entity, saved)
+        self._done = []
+        document.dirty = True
+
+
+class SetAllVisibleCommand(Command):
+    """ANNOALLVISIBLE of one space."""
+
+    name = "ANNOALLVISIBLE"
+    needs_regen = True
+
+    def __init__(self, layout, on: bool) -> None:
+        self.layout = layout
+        self.on = on
+        self._old = True
+
+    def do(self, document) -> None:
+        self._old = all_visible(self.layout)
+        set_all_visible(self.layout, self.on)
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        set_all_visible(self.layout, self._old)
+        document.dirty = True

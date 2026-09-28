@@ -395,8 +395,16 @@ class DimStyleEditorDialog(QDialog):
 
         scale_group = QGroupBox(tr("Scale for dimension features"))
         f = QFormLayout(scale_group)
+        # Annotative (p. 632): DIMSCALE is locked to 0 and CANNOSCALE sizes
+        # the dimensions, so the overall scale box has nothing to say
+        self.annotative = QCheckBox(tr("Annotative"))
+        self.annotative.setChecked(bool(a("annotative", False)))
+        f.addRow(self.annotative)
         self.dimscale = _dspin(a("dimscale", 1.0) or 1.0, lo=0.001)
         f.addRow(tr("Use overall scale of"), self.dimscale)
+        self.dimscale.setEnabled(not self.annotative.isChecked())
+        self.annotative.toggled.connect(
+            lambda on: self.dimscale.setEnabled(not on))
         fv.addWidget(scale_group)
 
         fine_group = QGroupBox(tr("Fine tuning"))
@@ -542,7 +550,9 @@ class DimStyleEditorDialog(QDialog):
             "dimtix": int(self.dimtix.isChecked()),
             "dimsoxd": int(self.dimsoxd.isChecked()),
             "dimtmove": self.dimtmove.currentData(),
-            "dimscale": self.dimscale.value(),
+            "dimscale": 0.0 if self.annotative.isChecked()
+                        else self.dimscale.value(),
+            "annotative": self.annotative.isChecked(),
             "dimupt": int(self.dimupt.isChecked()),
             "dimtofl": int(self.dimtofl.isChecked()),
             # Primary units

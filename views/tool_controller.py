@@ -38,6 +38,7 @@ from tools.align import ALIGN_TOOL_CLASSES
 from tools.boundary import BOUNDARY_TOOL_CLASSES
 from tools.donut import DONUT_TOOL_CLASSES
 from tools.lengthen import LENGTHEN_TOOL_CLASSES
+from tools.annoscale import ANNO_TOOL_CLASSES
 from tools.scaletext import SCALETEXT_TOOL_CLASSES
 from tools.leaders import LEADER_TOOL_CLASSES
 from tools.dim_commands import DIMCMD_TOOL_CLASSES   # #39
@@ -162,6 +163,7 @@ ALL_TOOL_CLASSES = {**TOOL_CLASSES, **EDIT_TOOL_CLASSES, **BLOCK_TOOL_CLASSES,
                     **MODIFY_TOOL_CLASSES, **CLEANUP_TOOL_CLASSES,
                     **ATTRIBUTE_TOOL_CLASSES,
                     **LENGTHEN_TOOL_CLASSES, **ALIGN_TOOL_CLASSES,
+                    **ANNO_TOOL_CLASSES,
                     **BOUNDARY_TOOL_CLASSES, **DONUT_TOOL_CLASSES,
                     **SCALETEXT_TOOL_CLASSES, **DIMCMD_TOOL_CLASSES,
                     **XREF_TOOL_CLASSES}

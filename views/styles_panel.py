@@ -14,6 +14,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -75,10 +76,26 @@ class StyleEditorDialog(QDialog):
             font.setCurrentText(props["font"])
             self._widgets["font"] = font
             form.addRow(tr("Font"), font)
+            # Annotative (STYLE, p. 1856): the height becomes a paper height
+            anno = QCheckBox(tr("Annotative"))
+            anno.setChecked(bool(props.get("annotative", False)))
+            self._widgets["annotative"] = anno
+            form.addRow(anno)
             self._add_num(form, "height", tr("Height"), props["height"], 0, 1e6, 2)
+            height_label = form.labelForField(self._widgets["height"])
+
+            def relabel(on, label=height_label):
+                label.setText(tr("Paper text height") if on else tr("Height"))
+
+            anno.toggled.connect(relabel)
+            relabel(anno.isChecked())
             self._add_num(form, "width", tr("Width factor"), props["width"], 0.01, 100, 3)
             self._add_num(form, "oblique", tr("Oblique"), props["oblique"], -85, 85, 1)
         else:
+            anno = QCheckBox(tr("Annotative"))
+            anno.setChecked(bool(props.get("annotative", False)))
+            self._widgets["annotative"] = anno
+            form.addRow(anno)
             self._add_num(form, "dimtxt", tr("Text height"), props["dimtxt"], 0, 1e6, 2)
             self._add_num(form, "dimasz", tr("Arrow size"), props["dimasz"], 0, 1e6, 2)
             self._add_num(form, "dimscale", tr("Overall scale"), props["dimscale"], 0, 1e6, 3)
@@ -120,6 +137,10 @@ class StyleEditorDialog(QDialog):
                 out[key] = w.value()
             elif isinstance(w, QComboBox):
                 out[key] = w.currentText()
+            elif isinstance(w, QCheckBox):
+                out[key] = w.isChecked()
+        if out.get("annotative") and "dimscale" in out:
+            out["dimscale"] = 0.0         # an annotative dim style: CANNOSCALE
         return out
 
 
@@ -200,14 +221,14 @@ class StylesPanel(QWidget):
         for name in style_ops.text_style_names(self._document):
             props = style_ops.text_style_props(self._document, name)
             icon = QIcon(prev.text_style_pixmap(props, _ICON.width(), _ICON.height()))
-            self._add_item(name, icon, name == cur)
+            self._add_item(name, icon, name == cur, props.get("annotative"))
 
     def _fill_dim(self) -> None:
         cur = style_ops.current_dim_style(self._document)
         for name in style_ops.dim_style_names(self._document):
             props = style_ops.dim_style_props(self._document, name)
             icon = QIcon(prev.dim_style_pixmap(props, _ICON.width(), _ICON.height()))
-            self._add_item(name, icon, name == cur)
+            self._add_item(name, icon, name == cur, props.get("annotative"))
 
     def _fill_hatch(self) -> None:
         from tools.blocks import HatchTool
@@ -216,9 +237,17 @@ class StylesPanel(QWidget):
         for name in HatchDialog.COMMON:
             self._add_item(name, QIcon(_pattern_pixmap(name)), name == cur)
 
-    def _add_item(self, name: str, icon: QIcon, current: bool) -> None:
-        label = f"{name}   ({tr('current')})" if current else name
+    def _add_item(self, name: str, icon: QIcon, current: bool,
+                  annotative: bool = False) -> None:
+        label = name
+        if annotative:
+            # AutoCAD marks annotative styles with its triangle icon
+            label += "  \u25b2"
+        if current:
+            label += f"   ({tr('current')})"
         item = QListWidgetItem(icon, label)
+        if annotative:
+            item.setToolTip(tr("Annotative"))
         item.setData(Qt.UserRole, name)
         if current:
             f = item.font()

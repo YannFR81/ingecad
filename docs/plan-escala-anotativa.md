@@ -45,9 +45,52 @@ factor(default)`. A dimension representation has its **own `*D` block**.
 |---|---|---|
 | **A0 · LibreDWG** | XDATA of several applications fused into one (#1422); `ACAD` APPID hard-coded (#1423); context data kept out of DXF (#1424); **`dxf2dwg` import of the context classes** | 3 of 4 done and vendored 2026-09-24; the import is open |
 | **A1 · Show** | `core/annotative.py` reader; the render draws each space at its scale (model: CANNOSCALE, viewport: its XRECORD, sheet: default); ANNOALLVISIBLE; live pan off for viewports at another scale; Save as DWG warns when scales would be lost | **done 2026-09-24** |
-| **A2 · Create** (Rafael's ask) | Annotative checkbox in the text style (paper height) and the dimension style (Fit tab, DIMSCALE 0); TEXT/MTEXT/dimensions born annotative at CANNOSCALE; the annotation-scale control on the status bar (model space) and the viewport's own scale; a new viewport gets one | next |
+| **A2 · Create** (Rafael's ask) | Annotative checkbox in the text style (paper height) and the dimension style (Fit tab, DIMSCALE 0); TEXT/MTEXT/dimensions born annotative at CANNOSCALE; the annotation-scale control on the status bar (model space) and the viewport's own scale; a new viewport gets one | **done 2026-09-28** (see below) |
 | **A3 · Edit** | copy/move/rotate/scale/erase carry every representation (ezdxf's `copy()` shares the context objects, `delete` orphans them — measured); OBJECTSCALE, ANNOAUTOSCALE, ANNORESET, ANNOUPDATE, SCALELISTEDIT; SELECTIONANNODISPLAY | |
 | later | annotative blocks and attributes (creation), MLEADER and hatch representations, MSLTSCALE, SAVEFIDELITY | |
+
+## A2 as shipped (2026-09-28, issue #43)
+
+- **Styles.** The sidebar's text style editor and the Dimension Style
+  dialog's Fit tab have the **Annotative** box. The flag is the
+  `AcadAnnotative` XDATA on the STYLE / DIMSTYLE entry, written only when
+  it changes (off stays absent, as a plain AutoCAD style). An annotative
+  dimension style has DIMSCALE locked to 0. The Styles panel marks
+  annotative styles with ▲.
+- **Creation** lives in `core/actions.py`, so every tool benefits:
+  `AddEntityCommand` annotates a TEXT/MTEXT whose style is annotative
+  (`core.annotative.annotate_new_entity`: typed height = paper height, model
+  height = paper × factor, MTEXT width scaled too, one default
+  representation); `AddDimensionCommand` renders an annotative-style
+  dimension with DIMSCALE = the scale's factor and gives linear/aligned
+  dimensions their default representation (`ACDB_ALDIMOBJECTCONTEXTDATA_CLASS`,
+  body as measured on file G); other kinds get the flag only. Undo deletes
+  the representations with the object. TEXT asks "Specify paper text
+  height" under an annotative style (p. 1933). The creation scale is
+  CANNOSCALE in model space (1:1 when unset) and 1:1 on the sheet.
+- **The scale of the view.** A status-bar drop-down lists `ACAD_SCALELIST`:
+  on the Model tab it sets CANNOSCALE, inside a viewport (MSPACE) that
+  viewport's own scale, on the bare sheet it is disabled (paper is 1:1).
+  One undo step (`SetAnnotationScaleCommand`). CANNOSCALE on the command
+  line takes only a named scale of the list. Beside it, the ANNOALLVISIBLE
+  toggle (per space, undoable) and the ANNOAUTOSCALE toggle (a setting, as
+  AutoCAD keeps it in the registry, -4..4, negative = off): when on,
+  changing the model's scale adds the new one to the objects that
+  supported the old one (AutoCAD's value 4 behaviour; the layer filters of
+  1-3 are not applied).
+- **OBJECTSCALE / -OBJECTSCALE**: the command-line form (Add / Delete / ?,
+  "Enter named scale to add or [?]:"); the default representation is never
+  deleted. The dialog form is not built: both names run the prompts.
+- **New viewports** get the `ASDK_XREC_ANNOTATION_SCALE_INFO` XRECORD at
+  CANNOSCALE, but only in drawings that already have a scale list (a plain
+  drawing is not given one it never asked for).
+- Round trip: DXF keeps every representation (tested). Save as DWG keeps
+  A1's warning (A0's import gap).
+
+Left for A3 or later: representations for angular/radial/ordinate
+dimensions (flag only today), MLEADERSTYLE's Annotative, the OBJECTSCALE
+dialog, ANNORESET/ANNOUPDATE, SCALELISTEDIT, ANNOAUTOSCALE's layer filters
+and autoscale inside viewports, "Match Text Orientation to Layout".
 
 ## Decisions and assumptions, to revisit with evidence
 

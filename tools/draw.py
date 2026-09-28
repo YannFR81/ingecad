@@ -929,11 +929,26 @@ class TextTool(Tool):
         return name or "Standard", 0.0
 
     # -- prompts ---------------------------------------------------------------
+    def _annotative(self) -> bool:
+        document = self._document()
+        if document is None:
+            return False
+        from core import annotative
+
+        style, _fixed = self._style_info()
+        return annotative.style_is_annotative(document, "styles", style)
+
     def _after_point(self) -> None:
         _style, fixed = self._style_info()
         if fixed > 0.0:
             self._height = fixed
             self._rotation_prompt()
+        elif self._annotative():
+            # "The Specify Paper Text Height prompt is displayed only if the
+            # current text style is annotative" (p. 1933): the model height
+            # follows from the annotation scale when the text is created
+            self.prompt("Specify paper text height <{h:g}>:",
+                        h=type(self).default_height)
         else:
             self.prompt("Specify height <{h:g}>:",
                         h=type(self).default_height)
