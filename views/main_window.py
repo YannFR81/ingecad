@@ -2322,7 +2322,15 @@ class MainWindow(QMainWindow):
 
         self._statusbar_custom_btn = QToolButton(self)
         self._statusbar_custom_btn.setText("≡")
-        self._statusbar_custom_btn.setStyleSheet(style)
+        # its own look, not the dim unchecked-toggle grey: it is the way to
+        # everything the bar hides, so it has to be found (Marco)
+        self._statusbar_custom_btn.setStyleSheet("""
+        QToolButton { color: #e8e8e8; font-size: 17px; font-weight: bold;
+            padding: 0px 8px; border: 1px solid #4a5a6a; border-radius: 3px;
+            background: #2f3a45; }
+        QToolButton:hover { background: #3d5063; border-color: #6a8aa8; }
+        QToolButton:pressed { background: #4a6480; }
+        """)
         self._statusbar_custom_btn.setFocusPolicy(Qt.NoFocus)
         self._statusbar_custom_btn.setToolTip(tr("Customize the status bar"))
         self._statusbar_custom_btn.clicked.connect(
