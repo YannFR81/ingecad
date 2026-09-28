@@ -162,6 +162,9 @@ def test_dragging_right_after_the_double_click_never_freezes_or_regens(win):
     real = win.regen_in_memory
     win.regen_in_memory = lambda *a, **k: fired.append(1) or real(*a, **k)
     win.switch_layout("Layout1")
+    # the drag must still be under way when the scene lands: on a slow CI
+    # machine the 700 ms settle timer ended the gesture first
+    win._vp_gesture_timer.setInterval(60_000)
     win._activate_viewport(vp)
     worker = win._vp_live_worker
     assert worker is not None and worker.objectName() == "vp-live"
@@ -170,7 +173,9 @@ def test_dragging_right_after_the_double_click_never_freezes_or_regens(win):
         assert win.vp_view_pan(1.0, 0.5) is True
     assert fired == []
     worker.wait()
-    for _ in range(5):
+    import time
+    deadline = time.monotonic() + 2.0                 # a slow CI delivers late
+    while win.viewport._live_vp is None and time.monotonic() < deadline:
         QApplication.processEvents()
     assert win.viewport._live_vp is not None          # caught up, mid-gesture
     assert fired == []

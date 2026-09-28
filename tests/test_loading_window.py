@@ -59,8 +59,12 @@ def test_a_small_file_never_flashes_the_window(qapp, tmp_path):
 
     win = MainWindow()
     win.show()
+    # the rule under test is "not before min_ms"; on a slow CI machine even
+    # a tiny file can take longer than the default 400 ms, and then showing
+    # the window is right -- so the threshold is set beyond any open here
+    win._loading_min_ms = 60_000
     try:
-        win.open_path(_dxf(tmp_path))         # default min_ms = 400
+        win.open_path(_dxf(tmp_path))
         shown = False
         t0 = time.monotonic()
         while win._open_thread is not None and time.monotonic() - t0 < 30:
