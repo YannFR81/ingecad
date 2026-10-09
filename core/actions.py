@@ -2016,19 +2016,37 @@ class PasteCommand(Command):
 
     name = "PASTE"
 
-    def __init__(self, sources, dx: float, dy: float) -> None:
+    def __init__(self, sources, dx: float, dy: float, originals=None) -> None:
         sources = list(sources)
         self.skipped = [e for e in sources if not transformable(e)]
         self.sources = [e for e in sources if transformable(e)]
+        #: The copied entities themselves, aligned with ``sources``: what a
+        #: paste into another drawing loads, resources and all.
+        self.originals = None
+        if originals is not None and len(originals) == len(sources):
+            self.originals = [o for o, e in zip(originals, sources)
+                              if transformable(e)]
         self.dx = dx
         self.dy = dy
         self.copies: list = []
+
+    #: True when the clipboard came from another drawing (set by ``do``).
+    foreign = False
 
     def do(self, document) -> None:
         from ezdxf.math import Matrix44
 
         msp = self.space(document)
         m = Matrix44.translate(self.dx, self.dy, 0.0)
+        source_doc = self.sources[0].doc if self.sources else None
+        self.foreign = source_doc is not None and source_doc is not document.doc
+        if self.foreign and self.originals and all(
+                o.is_alive and o.doc is source_doc for o in self.originals):
+            self.copies = self._load_foreign(document, msp)
+            for clone in self.copies:
+                transform_entity(clone, m)
+            document.dirty = True
+            return
         self.copies = []
         for e in self.sources:
             clone = _copy_or_none(e)
@@ -2038,6 +2056,22 @@ class PasteCommand(Command):
             msp.add_entity(clone)
             self.copies.append(clone)
         document.dirty = True
+
+    def _load_foreign(self, document, space) -> list:
+        """Copied in one drawing, pasted in another (#75): an entity copy
+        still names its own drawing's layers, blocks, text and dimension
+        styles, linetypes -- none of which exist here, so a pasted block
+        reference drew nothing. ezdxf's xref module carries every resource
+        along (an existing name wins, as AutoCAD's paste keeps the
+        target's definition)."""
+        from ezdxf import xref
+
+        before = {e.dxf.handle for e in space}
+        loader = xref.Loader(self.sources[0].doc, document.doc,
+                             conflict_policy=xref.ConflictPolicy.KEEP)
+        loader.add_command(xref.LoadEntities(self.originals, space))
+        loader.execute()
+        return [e for e in space if e.dxf.handle not in before]
 
     def undo(self, document) -> None:
         msp = self.space(document)

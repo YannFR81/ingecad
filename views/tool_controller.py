@@ -821,6 +821,9 @@ class ToolController(QObject):
             except Exception:
                 base = (0.0, 0.0)
         self._clipboard = ([e.copy() for e in entities], base)
+        # the entities themselves, for a paste into ANOTHER drawing: only
+        # entities in their drawing's database carry their resources over
+        self._clipboard_originals = list(entities)
         # source handles (aligned with the clipboard) let paste register its
         # copies in the pick index by translating the sources' cached rows
         self._clipboard_src = [e.dxf.handle for e in entities]
@@ -831,6 +834,9 @@ class ToolController(QObject):
 
     def clipboard_data(self):
         return self._clipboard if self._clipboard else (None, None)
+
+    def clipboard_originals(self) -> list | None:
+        return getattr(self, "_clipboard_originals", None) if self._clipboard else None
 
     def paste(self) -> None:
         """Ctrl+V: place the clipboard entities from a picked point."""
@@ -1258,7 +1264,9 @@ class ToolController(QObject):
         if isinstance(command, actions.PasteCommand):
             # PasteCommand copies the source list — compare element-wise
             clip = self._clipboard[0] if self._clipboard else None
-            if (clip is not None and len(clip) == len(command.sources)
+            # (a paste from another drawing: its rows are not in this index)
+            if (clip is not None and not command.foreign
+                    and len(clip) == len(command.sources)
                     and len(self._clipboard_src) == len(added)
                     and all(a is b for a, b in zip(clip, command.sources))):
                 src, offset = self._clipboard_src, (command.dx, command.dy)

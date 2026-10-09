@@ -127,3 +127,80 @@ def test_undo_records_removed_handles_for_surgical_hide():
     new_handles = [e.dxf.handle for e in rep.new_entities]
     h.history.undo()
     assert rep.removed_handles == new_handles
+
+
+def _colleague(tmp_path):
+    """A drawing whose content needs its own layer, block, text style and
+    a dimension (with its anonymous *D block)."""
+    doc = ezdxf.new("R2018", setup=True)
+    doc.layers.add("MUROS", color=1)
+    doc.styles.add("ROMANS", font="romans.shx")
+    door = doc.blocks.new("PUERTA")
+    door.add_arc((0, 0), 1, 0, 90)
+    door.add_line((0, 0), (1, 0))
+    msp = doc.modelspace()
+    msp.add_blockref("PUERTA", (5, 5), dxfattribs={"layer": "MUROS"})
+    msp.add_text("Hola", dxfattribs={"style": "ROMANS", "layer": "MUROS"})
+    msp.add_linear_dim(base=(0, 3), p1=(0, 0), p2=(10, 0)).render()
+    path = tmp_path / "colega.dxf"
+    doc.saveas(path)
+    return path
+
+
+def _open(qapp, win, path):
+    import time
+
+    win.open_path(path)
+    t0 = time.monotonic()
+    while (win._open_thread is not None or win._regen_worker is not None) \
+            and time.monotonic() - t0 < 30:
+        qapp.processEvents()
+    qapp.processEvents()
+
+
+def test_copy_in_one_drawing_and_paste_in_another_keeps_what_it_needs(qapp, tmp_path):
+    # #75: copy/paste between files "truncated" the elements -- the pasted
+    # copies named the first drawing's block, layer and styles, which the
+    # second one did not have. Pressed for real: Ctrl+C, open, Ctrl+V.
+    from PySide6.QtGui import QKeySequence
+    from PySide6.QtTest import QTest
+
+    from views.main_window import MainWindow
+
+    mine = ezdxf.new("R2018")
+    mine.modelspace().add_circle((0, 0), 1)
+    mine.blocks.new("*D1")                       # a name the paste must not take
+    mine.saveas(tmp_path / "mio.dxf")
+    win = MainWindow()
+    win.maybe_save_changes = lambda: True
+    win.show()
+    try:
+        _open(qapp, win, _colleague(tmp_path))
+        win.tools.select_all()
+        win.viewport.setFocus()
+        QTest.keySequence(win.viewport, QKeySequence("Ctrl+C"))
+        qapp.processEvents()
+        _open(qapp, win, tmp_path / "mio.dxf")
+        win.viewport.setFocus()
+        QTest.keySequence(win.viewport, QKeySequence("Ctrl+V"))
+        qapp.processEvents()
+        win.tools.on_text("100,0")
+        qapp.processEvents()
+        out = tmp_path / "pegado.dxf"
+        win.document.save_as(out)
+    finally:
+        win.document.dirty = False
+        win.close()
+    back = ezdxf.readfile(out)
+    pasted = {e.dxftype(): e for e in back.modelspace()}
+    assert set(pasted) == {"CIRCLE", "INSERT", "TEXT", "DIMENSION"}
+    assert "MUROS" in back.layers and "ROMANS" in back.styles
+    assert len(back.blocks.get("PUERTA")) == 2
+    # moved together, about 100 to the right (the base is the selection's
+    # lower-left corner, a little left of the text)
+    ins, text = pasted["INSERT"].dxf.insert, pasted["TEXT"].dxf.insert
+    assert (ins.x - text.x, ins.y - text.y) == pytest.approx((5, 5))
+    assert 100 < text.x < 101
+    geometry = pasted["DIMENSION"].dxf.geometry
+    assert geometry != "*D1" and len(back.blocks.get(geometry)) > 0
+    assert not back.audit().has_errors

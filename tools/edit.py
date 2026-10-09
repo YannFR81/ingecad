@@ -1178,6 +1178,8 @@ class PasteTool(Tool):
             self.ctx.echo(tr("Clipboard is empty."))
             self.ctx.finish()
             return
+        originals = getattr(self.ctx.services, "clipboard_originals", None)
+        self._originals = originals() if callable(originals) else None
         # ghost: the actual clipboard geometry follows the cursor
         self.ghost_entities = self._sources
         self.ghost_base = self._base
@@ -1185,7 +1187,8 @@ class PasteTool(Tool):
 
     def on_point(self, point: Point) -> None:
         dx, dy = point[0] - self._base[0], point[1] - self._base[1]
-        self.ctx.execute(actions.PasteCommand(self._sources, dx, dy))
+        self.ctx.execute(actions.PasteCommand(self._sources, dx, dy,
+                                              originals=self._originals))
         self.ctx.finish()
 
 
@@ -1225,7 +1228,8 @@ class PasteBlockTool(PasteTool):
         from core.commands import CompositeCommand, DeferredCommand
 
         dx, dy = point[0] - self._base[0], point[1] - self._base[1]
-        paste = actions.PasteCommand(self._sources, dx, dy)
+        paste = actions.PasteCommand(self._sources, dx, dy,
+                                     originals=self._originals)
 
         def block(document):
             doc = document.doc
