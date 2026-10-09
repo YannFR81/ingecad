@@ -670,11 +670,12 @@ class DimStyleManagerDialog(QDialog):
         return self.window.document
 
     def _styles_in_use(self) -> set[str]:
-        used = set()
-        for e in self.document.doc.entitydb.values():
-            if e.is_alive and e.dxftype() in ("DIMENSION", "ARC_DIMENSION"):
-                used.add(e.dxf.get("dimstyle", ""))
-        return used
+        from core.layers import placed_entities
+
+        # Not the entity database: ERASEd dimensions stay alive there for
+        # the undo and would keep their style "in use" (#64).
+        return {e.dxf.get("dimstyle", "") for e in placed_entities(self.document)
+                if e.dxftype() in ("DIMENSION", "ARC_DIMENSION")}
 
     def selected(self) -> str | None:
         item = self.list.currentItem()
