@@ -262,26 +262,29 @@ def _patch_lwpolyline_get_points() -> None:
 
 
 def _patch_radial_dimension_layout() -> None:
-    """DIMRADIUS / DIMDIAMETER with the text outside and DIMTOFL on.
+    """DIMRADIUS / DIMDIAMETER drawn by the drafting norm (#67).
 
-    The norm (ISO 129-1 / UNE 1-039) and AutoCAD's metric ISO-25 style, whose
-    DIMTOFL is on, draw the dimension line across the circle with the
-    arrowheads INSIDE it -- tips on the circle pointing outward, one on each
-    side of the diameter -- and the text outside on an extension of that
-    line. When the circle is too small for the arrowheads they go outside,
-    tips on the circle pointing in, and the line still runs across.
+    The rule Rafael teaches from ISO 129 / UNE, and Marco chose over
+    AutoCAD's ISO-25 rendering (2026-10-09):
 
-    ezdxf 1.4 draws neither. With a default location the near arrow sits
-    outside pointing in while the far one sits inside pointing out (both
-    INSERTs carry the same rotation); with a user location and DIMTMOVE 0/1
-    the far arrow is missing and the line stops at the centre. A tester
-    flagged the diameter dimension as "fuera de norma" for exactly that.
+    * the text does not fit inside: text outside, the arrowheads OUTSIDE
+      with their tips on the circle pointing to the centre, the dimension
+      line still through the centre and extended to carry the text; on a
+      diameter the far arrowhead too, with the line running a short way
+      past it (one arrowhead length past its tail: 5 mm with ISO-25) -- a
+      line cut at the arrow "as with a knife" reads wrong;
+    * the text fits inside: arrowheads inside, the text on the dimension
+      line, no extension of any kind; a diameter spans the whole circle.
 
-    Text inside, or DIMTOFL off (the imperial Standard style), keep ezdxf's
-    own paths. DIMTMOVE 2 (text moved freely, no leader) keeps ezdxf's
-    across-the-circle layout without the extension, as the variable says;
-    ezdxf reads an unset DIMTMOVE as 2 where AutoCAD's default is 0, so the
-    value is read here with AutoCAD's default.
+    ezdxf 1.4 draws the outside case with the arrowheads inside (or one in,
+    one out), and a diameter with its text placed inside as a single leader
+    from the text to the circle -- half a diameter.
+
+    DIMTOFL off (the imperial Standard style) keeps ezdxf's own paths.
+    DIMTMOVE 2 (text moved freely, no leader) keeps ezdxf's across-the-
+    circle layout without the extension, as the variable says; ezdxf reads
+    an unset DIMTMOVE as 2 where AutoCAD's default is 0, so the value is
+    read here with AutoCAD's default.
     """
     from ezdxf.render.dim_diameter import DiameterDimension
     from ezdxf.render.dim_radius import RadiusDimension
@@ -293,13 +296,6 @@ def _patch_radial_dimension_layout() -> None:
         m = self.measurement
         return (bool(m.text_is_outside) and bool(self.outside_text_force_dimline)
                 and self.dim_style.get("dimtmove", 0) != 2)
-
-    def arrows_fit_inside(self) -> bool:
-        """Room for the arrowheads inside the circle, with the text gap."""
-        need = self.arrows.arrow_size + self.measurement.text_gap
-        if self.dimension.dimtype == 4:      # radius: between centre and circle
-            return self.radius >= need
-        return 2.0 * self.radius >= 2.0 * need
 
     def ext_line(self, start, user: bool) -> None:
         """The extension from the circle (or the outside arrow) to the text."""
@@ -320,17 +316,12 @@ def _patch_radial_dimension_layout() -> None:
     radius_text = RadiusDimension.get_default_text_location
 
     def radius_iso(self, user: bool) -> None:
-        inside = arrows_fit_inside(self)
         if self.arrows.suppress1:
             base = self.point_on_circle
         else:
-            base = self.add_arrow(self.point_on_circle, rotate=not inside)
-        if inside:
-            self.add_radial_dim_line(base)          # centre to the arrow's base
-            ext_line(self, self.point_on_circle, user)
-        else:
-            self.add_radial_dim_line(self.point_on_circle)
-            ext_line(self, base, user)
+            base = self.add_arrow(self.point_on_circle, rotate=True)  # outside, to the centre
+        self.add_radial_dim_line(self.point_on_circle)
+        ext_line(self, base, user)
 
     def render_user_location_radius(self) -> None:
         if iso_case(self):
@@ -345,16 +336,7 @@ def _patch_radial_dimension_layout() -> None:
             radius_default(self)
 
     def default_text_location(self, original):
-        """With the arrowhead inside there is no arrow between the circle
-        and the text: the default text sits a gap past the circle."""
-        m = self.measurement
-        if (iso_case(self) and not m.text_outside_horizontal
-                and arrows_fit_inside(self)):
-            text_direction = _Vec2.from_deg_angle(m.text_rotation)
-            vertical = text_direction.orthogonal(ccw=True)
-            hdist = self._total_text_width / 2.0 + m.text_gap
-            midpoint = self.point_on_circle + self.dim_line_vec * hdist
-            return midpoint + vertical * m.text_vertical_distance()
+        """ezdxf's own: past the outside arrowhead, now always where it is."""
         return original(self)
 
     def get_default_text_location_radius(self):
@@ -366,16 +348,15 @@ def _patch_radial_dimension_layout() -> None:
     diameter_text = DiameterDimension.get_default_text_location
 
     def diameter_iso(self, user: bool) -> None:
-        inside = arrows_fit_inside(self)
-        # arrow 1 sits on the text side, arrow 2 across the circle
-        near = self._add_arrow_1(rotate=not inside)
-        far = self._add_arrow_2(rotate=inside)
-        if inside:
-            self.add_diameter_dim_line(near, far)   # base to base, through the centre
-            ext_line(self, self.point_on_circle, user)
-        else:
-            self.add_diameter_dim_line(self.point_on_circle, self.point_on_circle2)
-            ext_line(self, near, user)
+        # both arrowheads outside, tips on the circle pointing to the centre
+        near = self._add_arrow_1(rotate=True)
+        far = self._add_arrow_2(rotate=False)
+        self.add_diameter_dim_line(self.point_on_circle, self.point_on_circle2)
+        ext_line(self, near, user)
+        # the far side runs on past its arrowhead
+        outward = (self.point_on_circle2 - self.center).normalize()
+        self.add_line(far, far + outward * self.arrows.arrow_size,
+                      dxfattribs=self.dimension_line.dxfattribs())
 
     def diameter_across_with_text_inside(self) -> bool:
         """Text placed inside the circle, on the dimension line: ezdxf takes
