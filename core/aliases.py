@@ -153,7 +153,9 @@ def parse_pgp(text: str) -> dict[str, str]:
 
 
 def user_pgp_path() -> Path:
-    return Path.home() / ".config" / "IngeCAD" / "acad.pgp"
+    from core.paths import user_config_dir
+
+    return user_config_dir() / "acad.pgp"
 
 
 def starter_pgp() -> str:

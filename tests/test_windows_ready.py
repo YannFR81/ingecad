@@ -44,9 +44,43 @@ def test_converters_are_found_by_their_windows_name(tmp_path, monkeypatch):
     from formats import dwg_bridge
 
     (tmp_path / "dwg2dxf.exe").write_bytes(b"MZ")
+    from core import paths
+
     monkeypatch.setattr(dwg_bridge, "_VENDOR_BIN", tmp_path)
-    monkeypatch.setattr(dwg_bridge.os, "name", "nt")
+    monkeypatch.setattr(paths, "on_windows", lambda: True)
     assert dwg_bridge.find_dwg2dxf() == tmp_path / "dwg2dxf.exe"
     assert dwg_bridge.quiet_process() == {"creationflags": 0x08000000}   # CREATE_NO_WINDOW
-    monkeypatch.setattr(dwg_bridge.os, "name", "posix")
+    monkeypatch.setattr(paths, "on_windows", lambda: False)
     assert dwg_bridge.quiet_process() == {}
+
+
+def test_one_place_answers_where_the_users_files_live(monkeypatch, tmp_path):
+    """Recent drawings, acad.pgp, plot styles and plugins all ask core.paths
+    -- four modules used to build ~/.config/IngeCAD each its own way (one
+    ignored XDG_CONFIG_HOME) -- and on Windows the answer is %APPDATA%."""
+    from core import aliases, paths, plotstyles, plugins, recent
+
+    monkeypatch.setattr(paths, "on_windows", lambda: True)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    base = tmp_path / "Roaming" / "IngeCAD"
+    assert paths.user_config_dir() == base
+    assert recent.config_dir() == base
+    assert aliases.user_pgp_path() == base / "acad.pgp"
+    assert plotstyles.folder() == base / "PlotStyles"
+    assert plugins.user_plugins_dir() == base / "plugins"
+    assert recent.cache_dir() == tmp_path / "Local" / "IngeCAD" / "cache"
+
+
+def test_nothing_else_builds_the_config_folder_by_hand():
+    offenders = []
+    for folder in APP_DIRS:
+        for path in (ROOT / folder).rglob("*.py"):
+            rel = path.relative_to(ROOT).as_posix()
+            if rel in EXEMPT or rel == "core/paths.py":
+                continue
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.split("#", 1)[0]
+                if '".config"' in code or "XDG_CONFIG_HOME" in code or '".cache"' in code:
+                    offenders.append(f"{rel}:{n}")
+    assert not offenders, offenders

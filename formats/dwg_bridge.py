@@ -14,13 +14,13 @@ support arrives with LibreDWG Track L progress (no proprietary satellite).
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
 
+from core import paths
 from core.paths import app_root
 
 _VENDOR_BIN = app_root() / "vendor" / "libredwg" / "bin"
@@ -33,7 +33,7 @@ class DwgBridgeError(Exception):
 
 def _find_tool(name: str) -> Optional[Path]:
     # Windows: the converters are dwg2dxf.exe and so on (#28)
-    exe = name + ".exe" if os.name == "nt" else name
+    exe = name + ".exe" if paths.on_windows() else name
     bundled = _VENDOR_BIN / exe
     if bundled.is_file():
         return bundled
@@ -45,7 +45,7 @@ def quiet_process() -> dict:
     """subprocess keywords for a console program run from the GUI: on
     Windows, without CREATE_NO_WINDOW every conversion flashes a black
     terminal window (#28). Nothing elsewhere."""
-    if os.name == "nt":
+    if paths.on_windows():
         # the constant only exists in Windows' subprocess; its documented value
         return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
     return {}
