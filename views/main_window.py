@@ -1734,13 +1734,30 @@ class MainWindow(QMainWindow):
         if code == i18n.current_language():
             return
         QSettings().setValue("language", code)
+        previous = i18n.catalog()
         i18n.set_language(code)
-        self._retranslate()
+        self._retranslate(previous)
 
-    def _retranslate(self) -> None:
+    def _retranslate(self, previous: dict | None = None) -> None:
         name = self.document.name if self.document else tr("Untitled")
         self.setWindowTitle(f"IngeCAD — {name}")
         self._build_menus()
+        # everything else built with tr() (#74): side tabs, status-bar
+        # toggles, palettes, toolbars
+        from views.retranslate import retranslate_tree
+
+        retranslate_tree(self, previous or {})
+        for panel in ("_layers_panel", "_properties_panel", "_styles_panel",
+                      "_xrefs_panel"):
+            widget = getattr(self, panel, None)
+            refresh = getattr(widget, "refresh", None)
+            if callable(refresh):
+                refresh()
+        self._update_space_button()
+        # the property combos (ByLayer...) hold user names too, so they are
+        # rebuilt rather than walked: their cache key is dropped
+        self._props_combo_key = object()       # never equal: rebuild them
+        self._refresh_props_toolbar()
 
     # -- command line -----------------------------------------------------------
     def _build_command_line(self) -> None:

@@ -141,6 +141,12 @@ def current_language() -> str:
     return _lang
 
 
+def catalog() -> dict[str, str]:
+    """The active language's ``{English: translation}`` (a copy): what a live
+    language switch reads to find the English behind a text on screen."""
+    return dict(_catalog)
+
+
 def command_names() -> dict[str, str]:
     """``{typed token: English command}`` for the active language.
 
