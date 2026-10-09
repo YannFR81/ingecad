@@ -110,6 +110,9 @@ def test_double_click_on_a_layout_tab_renames_it(qapp, window, monkeypatch):
     # (QTest.mouseDClick sends both at once, onto the tabs just replaced.)
     QTest.mouseClick(handle, Qt.LeftButton, Qt.NoModifier, at)
     QTest.qWait(50)
+    # the rebuilt tabs may sit elsewhere (the active one is drawn wider)
+    button = next(b for b, n in window._tab_buttons.items() if n == layout)
+    at = button.mapTo(window, button.rect().center())
     QApplication.sendEvent(handle, QMouseEvent(
         QEvent.MouseButtonDblClick, at, handle.mapToGlobal(at), Qt.LeftButton,
         Qt.LeftButton, Qt.NoModifier))
