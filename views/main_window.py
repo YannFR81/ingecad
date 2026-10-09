@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import (QEvent, QObject, QPoint, QSettings, Qt,
+from PySide6.QtCore import (QEvent, QPoint, QSettings, Qt,
                             QThread, QTimer, Signal)
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
@@ -42,12 +42,18 @@ SETTING_SIDEBAR_SHOWN = "ui/sidebar_shown"
 SETTING_SIDEBAR_WIDTH = "ui/sidebar_width"
 
 
-class _OpenWorker(QObject):
+class _OpenWorker(QThread):
     """Loads and regens a drawing off the UI thread.
 
     Real plans take seconds (a colleague's 4.5 MB pavement sheet froze the UI
     for minutes before the hatch density cap) — the window must stay alive.
     Only plain Python/ezdxf objects cross the thread boundary.
+
+    A QThread subclass like every other worker. It was a QObject moved to a
+    QThread, the one worker of that shape -- and every crash the CI caught
+    (a SIGBUS destroying it on its own thread, segfaults delivering posted
+    events on the GUI thread) happened while a drawing opened. This object
+    lives on the GUI thread its whole life; only run() is elsewhere.
     """
 
     done = Signal(object, object)   # Document, Scene
@@ -56,16 +62,16 @@ class _OpenWorker(QObject):
 
     def __init__(self, path: Path) -> None:
         super().__init__()
+        self.setObjectName("open-drawing")
         self._path = path
 
     def run(self) -> None:
         from core import gc_guard
 
-        # A QObject moved to its thread, not a QThread subclass: the rule
-        # "every worker runs under gc_guard.paused()" missed it, and the
-        # collector ran on this thread -- 106 collections while opening a
-        # small drawing with thresholds lowered, any of which may destroy a
-        # GUI object off the GUI thread.
+        # every worker under gc_guard.paused(): without it the collector
+        # ran on this thread -- 106 collections while opening a small
+        # drawing with thresholds lowered, any of which may destroy a GUI
+        # object off the GUI thread
         with gc_guard.paused():
             self._run()
 
@@ -5742,7 +5748,6 @@ class MainWindow(QMainWindow):
             worker.wait()
         thread = getattr(self, "_open_thread", None)
         if thread is not None:
-            thread.quit()
             thread.wait()
             self._open_thread = None
         timer = getattr(self, "_autosave_timer", None)
@@ -5873,11 +5878,7 @@ class MainWindow(QMainWindow):
         self._set_busy(tr("Opening {name}...", name=path.name))
         self._loading_begin(tr("Loading {name}...", name=path.name),
                             on_cancel=self._cancel_open)
-        thread = QThread(self)
-        thread.setObjectName("open-drawing")
         worker = _OpenWorker(path)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
         # a bound method of this window, never a lambda: PySide runs a plain
         # callable in the EMITTER's thread, and the loading window's label
         # was being set from the open thread (the CI's segfaults and bus
@@ -5885,12 +5886,10 @@ class MainWindow(QMainWindow):
         worker.phase.connect(self._on_open_phase)
         worker.done.connect(self._on_open_done)
         worker.failed.connect(self._on_open_failed)
-        worker.done.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(self._on_open_thread_finished)
-        self._open_thread = thread
-        self._open_worker = worker  # keep alive while the thread runs
-        gc_guard.start(thread)
+        worker.finished.connect(self._on_open_thread_finished)
+        self._open_thread = worker  # "an open is running", and its owner
+        self._open_worker = worker
+        gc_guard.start(worker)
 
     def _on_open_phase(self, text: str) -> None:
         self._loading_phase(tr(text))
@@ -5975,11 +5974,10 @@ class MainWindow(QMainWindow):
         self._set_busy("")
         if self._open_thread is not None:
             # ONE owner for the worker: Python, here, on the GUI thread, once
-            # its thread is truly over. A `finished -> worker.deleteLater`
+            # run() has truly returned. A `finished -> worker.deleteLater`
             # had Qt delete it on the open thread while this line dropped
             # the Python reference -- both destroyed it (the CI's SIGBUS in
             # Shiboken::Object::destroy, on the "open-drawing" thread).
             self._open_thread.wait()
-            self._open_thread.deleteLater()
         self._open_thread = None
         self._open_worker = None
