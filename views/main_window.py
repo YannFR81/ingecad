@@ -5887,7 +5887,6 @@ class MainWindow(QMainWindow):
         worker.failed.connect(self._on_open_failed)
         worker.done.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
         thread.finished.connect(self._on_open_thread_finished)
         self._open_thread = thread
         self._open_worker = worker  # keep alive while the thread runs
@@ -5975,6 +5974,12 @@ class MainWindow(QMainWindow):
         # runs microseconds later -- clearing it wiped it before it was read.
         self._set_busy("")
         if self._open_thread is not None:
+            # ONE owner for the worker: Python, here, on the GUI thread, once
+            # its thread is truly over. A `finished -> worker.deleteLater`
+            # had Qt delete it on the open thread while this line dropped
+            # the Python reference -- both destroyed it (the CI's SIGBUS in
+            # Shiboken::Object::destroy, on the "open-drawing" thread).
+            self._open_thread.wait()
             self._open_thread.deleteLater()
         self._open_thread = None
         self._open_worker = None
