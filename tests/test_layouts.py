@@ -1459,3 +1459,37 @@ def test_the_viewport_scale_brings_its_annotation_scale_along(qapp):
     assert annotative.viewport_scale(vp) == before
     assert layout_ops.viewport_scale(vp) != pytest.approx(1.0 / 5.0)
     win.close()
+
+
+def test_each_page_setup_margin_sits_on_its_side_of_the_sheet(qapp):
+    # #61 (Rafael, review 6, 23:23-25:50): "T R B L" in a row put his 20 mm
+    # on the wrong side twice. Each field now sits on its own side of a
+    # picture of the sheet, which lights the side being edited.
+    from views.page_setup_dialog import PageSetupDialog
+
+    win, t, vp = _layout_window(qapp)
+    layout = win.document.doc.layouts.get("Layout1")
+    dialog = PageSetupDialog(win, layout)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        preview = dialog.margins_preview.geometry()
+        box = dialog.margins_preview.parentWidget()
+
+        def centre(widget):
+            return widget.mapTo(box, widget.rect().center())
+
+        assert centre(dialog.margin_top).y() < preview.top()
+        assert centre(dialog.margin_bottom).y() > preview.bottom()
+        assert centre(dialog.margin_left).x() < preview.left()
+        assert centre(dialog.margin_right).x() > preview.right()
+        for side in ("top", "right", "bottom", "left"):
+            getattr(dialog, f"margin_{side}").setFocus()
+            qapp.processEvents()
+            assert dialog.margins_preview.lit_side() == side
+        dialog.landscape.setChecked(True)
+        width, height, _m = dialog.sheet()
+        assert width > height
+    finally:
+        dialog.close()
+        win.close()

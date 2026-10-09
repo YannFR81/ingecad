@@ -1863,5 +1863,9 @@
   "Middle right": "Medio derecha",
   "Bottom left": "Inferior izquierda",
   "Bottom center": "Inferior centro",
-  "Bottom right": "Inferior derecha"
+  "Bottom right": "Inferior derecha",
+  "Top margin": "Margen superior",
+  "Right margin": "Margen derecho",
+  "Bottom margin": "Margen inferior",
+  "Left margin": "Margen izquierdo"
 }
