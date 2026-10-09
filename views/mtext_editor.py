@@ -1056,7 +1056,10 @@ class MTextInPlaceEditor(QWidget):
         chrome = 0
         if not self._single_line:
             chrome += self._bar.sizeHint().height() + 1
-            if self.ruler.isVisible():
+            # isVisibleTo, not isVisible: the first pass runs before the
+            # editor is shown, when isVisible() is False for every child --
+            # the ruler then appeared on top of an area 18 px short
+            if self.ruler.isVisibleTo(self):
                 chrome += self.ruler.height() + 1
         self.setGeometry(int(sx) - 2, int(sy) - chrome - 2,
                          max(width + 4, self._bar.sizeHint().width() + 4),
