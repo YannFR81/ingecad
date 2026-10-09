@@ -15,6 +15,8 @@ runs the pick and reopens it with that state.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -219,7 +221,7 @@ class PrintDialog(QDialog):
     def _to_pdf(self) -> None:
         name = self.window.document.name if self.window.document else "plano"
         path, _f = file_dialogs.get_save_file(
-            self, tr("Save PDF"), f"{name}.pdf", "PDF (*.pdf)",
+            self, tr("Save PDF"), f"{Path(name).stem}.pdf", "PDF (*.pdf)",
             preferred=self.window.document.path if self.window.document else None)
         if not path:
             return

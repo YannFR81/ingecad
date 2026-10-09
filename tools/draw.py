@@ -857,7 +857,16 @@ class EllipseTool(Tool):
 class PointTool(Tool):
     def start(self) -> None:
         self.name = "POINT"
-        self.prompt("POINT Specify a point (Enter ends):")
+        # AutoCAD's first line (POINT, p. 1556): the point style in force
+        services = self.ctx.services
+        document = getattr(getattr(services, "window", None), "document", None)
+        if document is not None:
+            from core import points
+
+            self.ctx.echo(tr("Current point modes:  PDMODE={mode}  PDSIZE={size:.4f}",
+                             mode=points.pdmode(document.doc),
+                             size=points.pdsize(document.doc)))
+        self.prompt("Specify a point (Enter ends):")
 
     def on_point(self, point: Point) -> None:
         self.ctx.execute(actions.add_point(point))

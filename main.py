@@ -110,6 +110,9 @@ def _init_language() -> None:
     deliberate opt-in via Tools > Language.
     """
     i18n.set_language(str(QSettings().value("language", "en")))
+    from views import qt_translations
+
+    qt_translations.install(i18n.current_language())
 
 
 def _self_check() -> int:
@@ -165,6 +168,14 @@ def _self_check() -> int:
         print(f"  {'translations':<14}: MISSING  no language pack has a catalog "
               f"under {i18n.i18n_dir()}")
         problems.append("translations")
+    # Qt's own strings (OK, Cancel, Save...) come from PySide6's catalogs.
+    from PySide6.QtCore import QLibraryInfo
+
+    qt_dir = Path(QLibraryInfo.path(QLibraryInfo.TranslationsPath))
+    qt_ok = (qt_dir / "qtbase_es.qm").is_file()
+    print(f"  {'Qt catalogs':<14}: {'found' if qt_ok else 'MISSING'}  {qt_dir}")
+    if not qt_ok:
+        problems.append("Qt catalogs")
 
     # Plugins ship as folders under plugins/ (docs/plugins.md); a bundle
     # that forgot them, or the module one of them needs, starts fine and

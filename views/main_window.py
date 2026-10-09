@@ -15,6 +15,7 @@ from PySide6.QtCore import (QEvent, QObject, QPoint, QSettings, Qt,
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QDockWidget,
     QLabel,
     QMainWindow,
@@ -1023,8 +1024,17 @@ class MainWindow(QMainWindow):
         picked on the canvas, and it comes back as it was (AutoCAD, #52)."""
         from views.print_dialog import PICK_WINDOW, PrintDialog
 
+        document = self.document
+        layout = getattr(self, "_active_layout", "Model")
+        if state is None and document is not None:
+            # reopen as the last plot of this tab left it (Rafael's review 6:
+            # back to Extents / Fit / Meters after a Window / mm / acad.ctb)
+            state = document.plot_settings.get(layout)
         dialog = PrintDialog(self, state)
-        if dialog.exec() != PICK_WINDOW:
+        result = dialog.exec()
+        if result == QDialog.Accepted and document is not None:
+            document.plot_settings[layout] = dialog.state()
+        if result != PICK_WINDOW:
             return
         state = dialog.state()
 
@@ -1353,11 +1363,13 @@ class MainWindow(QMainWindow):
             item(circle_menu, label,
                  lambda _=False, o=option: self._circle_by(o))
         for label, name in ((tr("Arc"), "ARC"), (tr("Ellipse"), "ELLIPSE"),
-                            (tr("Rectangle"), "RECTANG"), (tr("Polygon"), "POLYGON"),
-                            (tr("Point"), "POINT")):
+                            (tr("Rectangle"), "RECTANG"), (tr("Polygon"), "POLYGON")):
             cmd_item(draw_menu, label, name)
-        # AutoCAD classic: Draw > Point > Divide / Measure
+        # AutoCAD classic: one Draw > Point, a submenu (Rafael's review 6
+        # found a "Point" item right above a "Point" submenu). POINT here
+        # repeats until Enter, so it is the menu's Multiple Point.
         point_menu = draw_menu.addMenu(tr("Point"))
+        cmd_item(point_menu, tr("Multiple Point"), "POINT")
         cmd_item(point_menu, tr("Divide"), "DIVIDE")
         cmd_item(point_menu, tr("Measure"), "MEASURE")
         cmd_item(draw_menu, tr("Spline"), "SPLINE")
@@ -1751,6 +1763,9 @@ class MainWindow(QMainWindow):
         QSettings().setValue("language", code)
         previous = i18n.catalog()
         i18n.set_language(code)
+        from views import qt_translations
+
+        qt_translations.install(i18n.current_language())   # Qt's own buttons
         self._retranslate(previous)
 
     def _retranslate(self, previous: dict | None = None) -> None:
@@ -2714,6 +2729,8 @@ class MainWindow(QMainWindow):
             self._styles_panel.refresh()
         if getattr(self, "_properties_panel", None) is not None:
             self._properties_panel.refresh()
+        if getattr(self, "_xrefs_panel", None) is not None:
+            self._xrefs_panel.refresh()    # not the last drawing's references
         self.setWindowTitle(f"IngeCAD — {tr('Untitled')}")
 
     # -- classic toolbars (Draw left, Modify top) ------------------------------

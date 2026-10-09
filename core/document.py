@@ -64,6 +64,9 @@ class Document:
         # dirty=True). Lets a background regen detect that the document
         # changed under it and that its result is stale.
         self.revision = 0
+        #: The last PLOT dialog settings per layout name, for the session:
+        #: the dialog reopens as it was left, the way AutoCAD's does.
+        self.plot_settings: dict[str, dict] = {}
         #: Name of the block open in the Block Editor, or None. While set,
         #: :meth:`current_space` answers with that block's layout, so every
         #: draw/edit/snap/pick path operates on the definition without
@@ -141,7 +144,11 @@ class Document:
 
     @property
     def name(self) -> str:
-        return self.path.name if self.path else "Untitled"
+        if self.path:
+            return self.path.name
+        from core.i18n import tr
+
+        return tr("Untitled")
 
     def current_space(self):
         """The space edits happen in — what every draw/edit/snap/pick path

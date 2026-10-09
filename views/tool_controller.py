@@ -622,8 +622,10 @@ class ToolController(QObject):
         every file dialog uses (views/file_dialogs.py)."""
         from views import file_dialogs
 
+        document = self.window.document
         filename, _selected = file_dialogs.get_save_file(
-            self.window, caption, suggested, name_filter)
+            self.window, caption, suggested, name_filter,
+            preferred=document.path if document is not None else None)
         return filename or None
 
     @property
