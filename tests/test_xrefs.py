@@ -186,6 +186,27 @@ def test_the_xref_definition_round_trips_untouched(tmp_path):
     assert len(inserts) == 1 and inserts[0].dxf.name == "topo"
 
 
+
+def test_the_xref_survives_save_as_dwg_and_reopen(tmp_path):
+    # #66: a DWG title block attached, saved as DWG, reopened -- the xref
+    # was gone. LibreDWG's DXF import dropped the BLOCK entity's 70 (xref
+    # bits) and 1 (path), which a DWG keeps in the BLOCK_HEADER.
+    from formats.dwg_bridge import find_dwg2dxf, find_dxf2dwg, load_dwg
+
+    if find_dxf2dwg() is None or find_dwg2dxf() is None:
+        pytest.skip("LibreDWG not available")
+    _referenced(tmp_path)
+    document = Document.load(_host(tmp_path, overlay=True))
+    out = tmp_path / "host.dwg"
+    document.save_as(out)
+    back = load_dwg(out)
+    found = {b.name: b for b in xrefs.xref_blocks(back.doc)}
+    assert "topo" in found
+    assert found["topo"].block.dxf.xref_path == "topo.dxf"
+    assert found["topo"].block.is_xref_overlay
+    assert [e.dxf.name for e in back.doc.modelspace().query("INSERT")] == ["topo"]
+
+
 # -- commands ------------------------------------------------------------------------
 
 def test_attach_and_detach_are_exact_undo_steps(tmp_path):

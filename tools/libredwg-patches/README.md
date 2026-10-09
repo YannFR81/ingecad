@@ -3,6 +3,21 @@
 IngeCAD embeds LibreDWG's `dwg2dxf`/`dxf2dwg` as satellite converters
 (`vendor/libredwg/bin`, gitignored).
 
+## 2026-10-08: xref blocks survive Save as DWG (IngeCAD #66)
+
+Appended to `current/ingecad-vendor-0.14.8597.patch`. An r13+ DXF has no 70
+in BLOCK_RECORD: a block's xref bits (70: 4 xref, 8 overlay, 32 resolved)
+and its path (1) are only in the BLOCK entity, while a DWG keeps them in
+the BLOCK_HEADER. `new_object` threw away BLOCK's 70 and 1 as "DXF
+artifacts", and the 1 that dynapi did take landed in `BLOCK.xref_pname`,
+which no DWG writes. So every xref saved through `dxf2dwg` came back as an
+empty plain block: an attached title block vanished after save and reopen
+(Rafael, review 6). Now the 70 bits go to the owning BLOCK_HEADER and the
+path is copied to it when the BLOCK is linked. ODA reads the result as an
+xref (70 = 4, 1 = `./FormatoA4.dxf`; before: 0 and empty). `make check`
+270/0; `dwg_fuzz.py run --count 500` identical seed by seed to the build
+without it.
+
 ## Current state — 2026-09-27: re-based on 0.14.8597
 
 `current/ingecad-vendor-0.14.8597.patch` carries everything below onto the
