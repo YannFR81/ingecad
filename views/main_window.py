@@ -235,6 +235,24 @@ class _SaveWorker(QThread):
                 self.error = exc
 
 
+class _InputHold(QWidget):
+    """Holds keyboard, mouse and shortcuts while a save runs, as AutoCAD
+    does: an application-modal window, invisible and never active. Qt
+    itself then drops the input of every other window -- the main one, the
+    floating toolbars, the shortcuts -- without a line of Python per event
+    (an app-wide event filter did it before, and cost the window a second
+    of GIL waits per save)."""
+
+    def __init__(self, parent) -> None:
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint
+                         | Qt.WindowTransparentForInput)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setGeometry(parent.x(), parent.y(), 1, 1)
+
+
 #: QSettings key of the main window's geometry (saveGeometry()).
 SETTING_WINDOW_GEOMETRY = "ui/window_geometry"
 
@@ -384,13 +402,13 @@ class MainWindow(QMainWindow):
         self.plugins.activate_enabled()
         self.viewport.cursorMoved.connect(self._on_cursor_moved)
 
-        # Frameless windows have no system resize borders; an app-wide filter
-        # turns presses on the outer margin into native resizes, wherever the
-        # child widget under the cursor is. The status bar's size grip still
-        # works as usual.
-        from PySide6.QtWidgets import QApplication
-
-        QApplication.instance().installEventFilter(self)
+        # The canvas's own events (typing over it, the sidebar handle that
+        # rides its edge); the native window's are watched from showEvent.
+        # Never an app-wide filter: it put EVERY event of the application --
+        # paints, timers, deleted widgets -- through Python, and while a
+        # worker held the GIL each one waited its turn. Save as DWG froze
+        # the window 1.05 s for it; 0.29 s without (release bench, 0.6.6).
+        self.viewport.installEventFilter(self)
 
     RESIZE_MARGIN = 8
 
@@ -1059,22 +1077,24 @@ class MainWindow(QMainWindow):
             self._plot_window_callback = None
             picked(None)
 
-    #: What a save holds back while it runs (see _save_off_the_ui_thread).
-    _HELD_DURING_SAVE = frozenset((
-        QEvent.KeyPress, QEvent.KeyRelease, QEvent.ShortcutOverride,
-        QEvent.Shortcut, QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
-        QEvent.MouseButtonDblClick, QEvent.Wheel, QEvent.Drop))
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        # The native window sees every key and press of this window before
+        # any widget does -- and nothing else (no paints, no timers).
+        handle = self.windowHandle()
+        if handle is not None and handle is not getattr(self, "_native_window", None):
+            handle.installEventFilter(self)
+            self._native_window = handle
 
     def eventFilter(self, obj, event) -> bool:
-        if (getattr(self, "_save_worker", None) is not None
-                and event.type() in self._HELD_DURING_SAVE):
-            return True
         # The sidebar handle rides the drawing's right edge.
         if (event.type() in (QEvent.Resize, QEvent.Move, QEvent.Show)
                 and obj is getattr(self, "viewport", None)):
             self._place_sidebar_handle()
+        native = obj is getattr(self, "_native_window", None)
         # In-place TEXT typing captures the keyboard before the command line.
         if (event.type() == QEvent.KeyPress and self.tools.text_capturing()
+                and (native or obj is getattr(self, "viewport", None))
                 and not event.modifiers() & (Qt.ControlModifier | Qt.AltModifier)):
             key = event.key()
             if key in (Qt.Key_Return, Qt.Key_Enter):
@@ -1106,14 +1126,13 @@ class MainWindow(QMainWindow):
             if name != "Model":
                 self._rename_layout_tab(name)
                 return True
+        # Frameless windows have no system resize borders: a press on the
+        # outer margin, whatever widget is under it, is a native resize. The
+        # status bar's size grip still works as usual.
         if (
-            event.type() == QEvent.MouseButtonPress
+            native
+            and event.type() == QEvent.MouseButtonPress
             and event.button() == Qt.LeftButton
-            and isinstance(obj, QWidget)
-            # Call QWidget.window() unbound: our panels store a `self.window`
-            # attribute (the MainWindow) that shadows the QWidget.window()
-            # method, so obj.window() would try to call the MainWindow.
-            and QWidget.window(obj) is self
             and not self.isMaximized()
         ):
             pos = self.mapFromGlobal(event.globalPosition().toPoint())
@@ -5168,6 +5187,7 @@ class MainWindow(QMainWindow):
                 lambda pos, n=name, btn=b: self._layout_tab_menu(
                     n, btn.mapToGlobal(pos)))
             self._tab_buttons[b] = name
+            b.installEventFilter(self)          # double-click renames
             self._layout_tab_bar.addWidget(b)
         plus = QToolButton(self._layout_tab_host)
         plus.setText("+")
@@ -5789,12 +5809,21 @@ class MainWindow(QMainWindow):
             self._loading_phase(tr("Writing the DXF, converting with LibreDWG "
                                    "and checking the result..."))
         QApplication.setOverrideCursor(Qt.BusyCursor)
+        # a modal window takes the focus off the windows it blocks and does
+        # not hand it back: remember who typed, and give it back after
+        focused = QApplication.focusWidget()
+        hold = _InputHold(self)
+        hold.show()
         try:
             gc_guard.start(worker)
             if not worker.isFinished():
                 loop.exec()
             worker.wait()
         finally:
+            hold.close()
+            if focused is not None and focused.isVisible():
+                focused.activateWindow()
+                focused.setFocus()
             QApplication.restoreOverrideCursor()
             self._save_worker = None
             self._loading_end()
