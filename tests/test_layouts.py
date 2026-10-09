@@ -1472,6 +1472,10 @@ def test_each_page_setup_margin_sits_on_its_side_of_the_sheet(qapp):
     dialog = PageSetupDialog(win, layout)
     dialog.show()
     qapp.processEvents()
+    # the CI's Xvfb has no window manager: the dialog is not always the
+    # active window there, so the test makes it so here too
+    win.activateWindow()
+    qapp.processEvents()
     try:
         preview = dialog.margins_preview.geometry()
         box = dialog.margins_preview.parentWidget()

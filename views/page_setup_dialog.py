@@ -57,10 +57,17 @@ class _MarginsPreview(QWidget):
         return QSize(150, 110)
 
     def lit_side(self):
-        """Which margin's field has the focus: "top", "right"... or None."""
+        """Which margin's field is the dialog's focus: "top", "right"... or
+        None. The dialog's own focus widget, not hasFocus(): that one also
+        wants the dialog to be the active window, and the side went dark
+        whenever it was not (the CI's Xvfb has no window manager)."""
         d = self._dialog
+        focus = d.focusWidget()
+        if focus is None:
+            return None
         for side in ("top", "right", "bottom", "left"):
-            if getattr(d, f"margin_{side}").hasFocus():
+            spin = getattr(d, f"margin_{side}")
+            if focus is spin or spin.isAncestorOf(focus):
                 return side
         return None
 

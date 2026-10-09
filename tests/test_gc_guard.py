@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import gc
 import threading
+import re
 import time
+from pathlib import Path
 
 import pytest
 
@@ -142,7 +144,7 @@ def test_the_last_worker_hands_the_collector_back_to_the_gui_thread(qapp):
                 kept.append([object()])
 
         thread = threading.Thread(target=worker)
-        thread.start()
+        gc_guard.start(thread)
         thread.join()
         assert not gc.isenabled() or gc_guard.pauses() == 0
         assert False not in where, "a collection ran on the worker thread"
@@ -191,3 +193,50 @@ def test_the_warmer_survives_forced_collections_beside_icon_garbage(qapp):
         gc.set_threshold(*old)
         win.document.dirty = False
         win.close()
+
+
+def test_a_worker_is_covered_from_its_first_allocation(qapp):
+    """The other end of a worker's life: paused only from inside, its first
+    allocations -- before the ``with`` -- ran with the collector on, and the
+    CI caught a collection on the worker there. gc_guard.start() pauses it
+    from the GUI thread before the thread exists."""
+    old = gc.get_threshold()
+    gc.set_threshold(10, 1, 1)
+    gc.collect()
+    where = []
+
+    def watch(phase, info):
+        if phase == "start":
+            where.append(threading.current_thread() is threading.main_thread())
+
+    gc.callbacks.append(watch)
+    try:
+        def worker():
+            kept = [[object()] for _ in range(2000)]   # before its pause
+            with gc_guard.paused():
+                kept.append([object()])
+
+        thread = threading.Thread(target=worker)
+        gc_guard.start(thread)
+        thread.join()
+        assert False not in where, "a collection ran on the worker thread"
+        qapp.processEvents()
+        assert gc.isenabled() and gc_guard.pauses() == 0
+    finally:
+        gc.callbacks.remove(watch)
+        gc.set_threshold(*old)
+
+
+def test_every_worker_is_started_through_the_guard():
+    """A bare .start() on a worker leaves its first allocations uncovered."""
+    root = Path(__file__).resolve().parent.parent
+    bare = re.compile(r"\b(\w*(?:worker|warmer|thread)\w*)\.start\(\)", re.I)
+    found = []
+    for folder in ("core", "views", "formats", "render", "plugins"):
+        for path in (root / folder).rglob("*.py"):
+            if path.name == "gc_guard.py":
+                continue                       # the one place that may
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if bare.search(line):
+                    found.append(f"{path.relative_to(root)}:{n}: {line.strip()}")
+    assert not found, "start these with gc_guard.start():\n" + "\n".join(found)

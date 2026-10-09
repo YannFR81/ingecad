@@ -36,8 +36,11 @@ def justification(text) -> str:
     return text.get_align_enum().name
 
 
-def _offset(name: str, width: float, cap: float, descent: float) -> tuple[float, float]:
-    """Where the alignment point sits from the left end of the baseline."""
+def _offset(name: str, width: float, cap: float, descent: float,
+            x_height: float) -> tuple[float, float]:
+    """Where the alignment point sits from the left end of the baseline,
+    by the renderer's rules (ezdxf.addons.drawing.text): MIDDLE is the
+    centre of the LOWER-case height, the MIDDLE_* ones of the capitals."""
     if name in ("LEFT", "ALIGNED", "FIT", "TOP_LEFT", "MIDDLE_LEFT", "BOTTOM_LEFT"):
         x = 0.0
     elif name in ("RIGHT", "TOP_RIGHT", "MIDDLE_RIGHT", "BOTTOM_RIGHT"):
@@ -51,38 +54,56 @@ def _offset(name: str, width: float, cap: float, descent: float) -> tuple[float,
     elif name.startswith("BOTTOM_"):
         y = -descent
     elif name == "MIDDLE":
-        y = (cap - descent) / 2.0
+        y = x_height / 2.0
     else:                                   # baseline: LEFT/CENTER/RIGHT/ALIGNED/FIT
         y = 0.0
     return x, y
+
+
+def _measure(text) -> tuple[float, float, float, float]:
+    """(width, cap height, descent, lower-case height) as the renderer
+    measures them: the same font (a CI box with other fonts put MIDDLE
+    0.04 off when it came from the cap and the descent)."""
+    from ezdxf.entities import get_font_name
+    from ezdxf.fonts import fonts
+    from ezdxf.tools.text_size import text_size
+
+    size = text_size(text)
+    metrics = fonts.make_font(get_font_name(text), size.cap_height,
+                              text.dxf.get_default("width")).measurements
+    return size.width, size.cap_height, metrics.descender_height, metrics.x_height
+
+
+def _turn(text):
+    angle = math.radians(text.dxf.get("rotation", 0.0))
+    cos, sin = math.cos(angle), math.sin(angle)
+    return lambda dx, dy: (dx * cos - dy * sin, dx * sin + dy * cos)
+
+
+def baseline_start(text, measured=None) -> tuple[float, float]:
+    """The left end of a TEXT's baseline, whatever its justification:
+    the point that stays put when the justification changes."""
+    measured = measured or _measure(text)
+    _align, p1, _p2 = text.get_placement()
+    ox, oy = _turn(text)(*_offset(justification(text), *measured))
+    return p1.x - ox, p1.y - oy
 
 
 def set_justification(text, name: str) -> None:
     """Give a TEXT the justification ``name`` (a TextEntityAlignment name)
     without moving its letters."""
     from ezdxf.enums import TextEntityAlignment
-    from ezdxf.tools.text_size import text_size
 
-    old = justification(text)
-    if name == old:
+    if name == justification(text):
         return
-    size = text_size(text)
-    width, cap = size.width, size.cap_height
-    descent = max(size.total_height - size.cap_height, 0.0)
-    angle = math.radians(text.dxf.get("rotation", 0.0))
-    cos, sin = math.cos(angle), math.sin(angle)
-
-    def turned(dx: float, dy: float) -> tuple[float, float]:
-        return dx * cos - dy * sin, dx * sin + dy * cos
-
-    _align, p1, _p2 = text.get_placement()
-    ox, oy = turned(*_offset(old, width, cap, descent))
-    base = (p1.x - ox, p1.y - oy)             # left end of the baseline
-    nx, ny = turned(*_offset(name, width, cap, descent))
+    measured = _measure(text)
+    turned = _turn(text)
+    base = baseline_start(text, measured)
+    nx, ny = turned(*_offset(name, *measured))
     target = (base[0] + nx, base[1] + ny)
     align = getattr(TextEntityAlignment, name)
     if name in ("ALIGNED", "FIT"):
-        ex, ey = turned(width, 0.0)
+        ex, ey = turned(measured[0], 0.0)
         text.set_placement(target, (base[0] + ex, base[1] + ey), align=align)
     else:
         text.set_placement(target, align=align)

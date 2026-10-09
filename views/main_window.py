@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import gc_guard
 from core import i18n
 from core.actions import Dispatcher, Prompt
 from core.commands import History
@@ -3703,7 +3704,7 @@ class MainWindow(QMainWindow):
                              self.document.revision)
         worker.done.connect(self._on_regen_done)
         self._regen_worker = worker
-        worker.start()
+        gc_guard.start(worker)
 
     def _on_regen_done(self, document, scene, revision, layout) -> None:
         worker, self._regen_worker = self._regen_worker, None
@@ -4248,7 +4249,7 @@ class MainWindow(QMainWindow):
         worker = _LiveSceneWorker(self.document, self._active_layout, key)
         worker.done.connect(self._on_live_scene_done)
         self._vp_live_worker = worker
-        worker.start()
+        gc_guard.start(worker)
 
     def _on_live_scene_done(self, key, scene) -> None:
         if scene is None or self.document is None or key != self._vp_live_key():
@@ -5650,7 +5651,7 @@ class MainWindow(QMainWindow):
         worker = _AutoSaveWorker(self.document, sv_path, info_path)
         worker.done.connect(self._on_autosave_done)
         self._autosave_worker = worker
-        worker.start()
+        gc_guard.start(worker)
 
     def _on_autosave_done(self, ok: bool, message: str) -> None:
         worker = self._autosave_worker
@@ -5786,7 +5787,7 @@ class MainWindow(QMainWindow):
                                    "and checking the result..."))
         QApplication.setOverrideCursor(Qt.BusyCursor)
         try:
-            worker.start()
+            gc_guard.start(worker)
             if not worker.isFinished():
                 loop.exec()
             worker.wait()
@@ -5888,7 +5889,7 @@ class MainWindow(QMainWindow):
         thread.finished.connect(self._on_open_thread_finished)
         self._open_thread = thread
         self._open_worker = worker  # keep alive while the thread runs
-        thread.start()
+        gc_guard.start(thread)
 
     def _cancel_open(self) -> None:
         """Cancel on the loading window: the worker cannot be stopped

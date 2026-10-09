@@ -12,7 +12,8 @@ reproducer that crashes on its first round (collections forced on every
 allocation, icon cycles made on the GUI thread while the warmer walks the
 drawing).
 
-The cure is small: every worker runs its body under :func:`paused`, which
+The cure is small: every worker is started by :func:`start` and runs its
+body under :func:`paused`, which
 switches the automatic collector off for as long as any worker is alive
 and back on when the last one finishes. The GUI thread's allocations
 trigger no collection meanwhile (a bounded pause, seconds at most), and
@@ -28,6 +29,9 @@ from contextlib import contextmanager
 
 _lock = threading.Lock()
 _paused = 0
+#: Pauses taken by :func:`start` for a worker that has not reached its
+#: ``paused()`` yet: the worker takes one over instead of adding its own.
+_reserved = 0
 
 
 def pauses() -> int:
@@ -35,14 +39,37 @@ def pauses() -> int:
     return _paused
 
 
+def start(thread) -> None:
+    """Start a worker thread with the collector ALREADY paused for it.
+
+    Paused only from inside the worker, the thread's first allocations --
+    its bootstrap, the frame of run() before the ``with`` -- still ran
+    with the collector on, and one that crossed the threshold collected
+    right there, on the worker (the CI caught it: a collection on the
+    worker thread before its pause). Taken here, on the GUI thread, the
+    pause covers the worker from its first instruction; its own
+    ``paused()`` then takes this one over.
+    """
+    global _paused, _reserved
+    with _lock:
+        _paused += 1
+        _reserved += 1
+        if _paused == 1:
+            gc.disable()
+    thread.start()
+
+
 @contextmanager
 def paused():
     """Run a worker's body with automatic garbage collection off."""
-    global _paused
+    global _paused, _reserved
     with _lock:
-        _paused += 1
-        if _paused == 1:
-            gc.disable()
+        if _reserved:
+            _reserved -= 1                   # the pause start() took for us
+        else:
+            _paused += 1
+            if _paused == 1:
+                gc.disable()
     try:
         yield
     finally:

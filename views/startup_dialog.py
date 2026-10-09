@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import gc_guard
 from core import recent as recent_mod
 from core import templates as templates_mod
 from core.i18n import tr
@@ -208,7 +209,7 @@ class StartupDialog(QDialog):
         if missing:
             self._worker = _ThumbnailWorker(missing)
             self._worker.ready.connect(self._thumbnail_ready)
-            self._worker.start()
+            gc_guard.start(self._worker)
 
     def _thumbnail_ready(self, drawing: str, thumb: str) -> None:
         for row in range(self.recent.count()):

@@ -27,6 +27,21 @@ def test_changing_the_justification_leaves_the_letters_in_place(label, name):
     assert _box(document) == pytest.approx(before, abs=0.01)
 
 
+@pytest.mark.parametrize("font", ["DejaVuSans.ttf", "LiberationSans-Regular.ttf"])
+def test_middle_stays_put_whatever_font_the_style_has(font):
+    """The CI box draws "txt" with DejaVu Sans, and MIDDLE moved 0.044 there
+    while it held still here: it followed the cap and the descent, the
+    renderer centres the lower-case height. Pinned here on named fonts."""
+    document = Document.new()
+    document.doc.styles.new("SANS", dxfattribs={"font": font})
+    text = document.modelspace().add_text(
+        "Hola gy", height=2.5,
+        dxfattribs={"insert": (10, 5), "rotation": 30, "style": "SANS"})
+    before = _box(document)
+    text_justify.set_justification(text, "MIDDLE")
+    assert _box(document) == pytest.approx(before, abs=0.01)
+
+
 def _row_combo(panel, label):
     from core.i18n import tr
 
@@ -76,11 +91,5 @@ def test_one_style_and_one_justification_for_several_texts(qapp):
 
 
 def _box_of(document, text):
-    from ezdxf.tools.text_size import text_size
-
-    _align, p1, _p2 = text.get_placement()
-    size = text_size(text)
-    x, y = text_justify._offset(text_justify.justification(text),
-                                size.width, size.cap_height,
-                                size.total_height - size.cap_height)
-    return (round(p1.x - x, 4), round(p1.y - y, 4))      # baseline start, unrotated
+    x, y = text_justify.baseline_start(text)
+    return (round(x, 4), round(y, 4))

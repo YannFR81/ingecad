@@ -15,6 +15,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from core import actions
+from core import gc_guard
 from core import layouts as layout_ops
 from core.coords import CoordinateError, parse_point
 from core.i18n import tr
@@ -491,7 +492,7 @@ class ToolController(QObject):
         warmer = _CacheWarmer(document, self._model_snap_engine is None)
         warmer.done.connect(self._on_caches_warm)
         self._warmers.add(warmer)
-        warmer.start()
+        gc_guard.start(warmer)
 
     def caches_warming(self) -> bool:
         """A warmer is still building the snap cache the cursor would need,
@@ -2248,7 +2249,7 @@ class ToolController(QObject):
                                   self.canvas_space())
             worker.done.connect(self._on_ghost_done)
             self._ghost_workers.add(worker)
-            worker.start()
+            gc_guard.start(worker)
         return None
 
     def _on_ghost_done(self, ents, scene) -> None:
