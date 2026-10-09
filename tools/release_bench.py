@@ -52,6 +52,7 @@ ACTIONS = [
     ("save_dwg", "Save as DWG"),
 ]
 FREEZE_LIMIT = 1.0          # seconds the GUI may not answer
+PAINT_LIMIT = 0.3           # an empty paint slower than this: a paced display
 SLOWER = 1.25               # ...and how much slower than the base is a flag
 SLOWER_ABS = 0.2
 
@@ -126,6 +127,19 @@ def run_one(src: Path, out: Path, tree: str) -> dict:
 
     for _ in range(20):
         app.processEvents()
+    # A locked or blanked screen makes GNOME pace this window at one frame
+    # a second: every paint then blocks ~1 s inside processEvents and every
+    # action reads 1.00, 2.00, 3.00 s, in both trees alike (2026-10-09, the
+    # 0.6.6 bench run while Marco was away). Measure a few empty paints
+    # first and say so, rather than report the compositor as freezes.
+    paints = []
+    for _ in range(5):
+        t = time.perf_counter()
+        vp.update()
+        app.processEvents()
+        vp.grabFramebuffer()
+        paints.append(time.perf_counter() - t)
+    res["paint_s"] = round(statistics.median(paints), 3)
     timed("open", lambda: win.open_path(src))
     res["entities"] = len(win.document.modelspace())
     vp.zoom_extents()
@@ -252,6 +266,14 @@ def _median(rows, key, field):
 
 def report(results: dict[str, dict[str, list]], base: str) -> int:
     flags = 0
+    throttled = sorted({r["tree"] for trees in results.values()
+                        for rows in trees.values() for r in rows
+                        if r.get("paint_s", 0) > PAINT_LIMIT})
+    if throttled:
+        print("\n!! The display paced the window (an empty paint took over "
+              f"{PAINT_LIMIT} s) in: {', '.join(throttled)}.\n!! Is the screen "
+              "locked or blank? Freezes below are the compositor, not IngeCAD: "
+              "run again with the screen on.")
     for plan, trees in results.items():
         head, old = trees.get("HEAD", []), trees.get(base, [])
         ents = next((r.get("entities") for r in head if "entities" in r), "?")
@@ -280,7 +302,7 @@ def report(results: dict[str, dict[str, list]], base: str) -> int:
                 print(f"  {key:<20}{(statistics.median(b) if b else 0):>15.1f} ms"
                       f"{(statistics.median(h) if h else 0):>15.1f} ms")
     print(f"\n{flags} flag(s).")
-    return 1 if flags else 0
+    return 1 if flags or throttled else 0
 
 
 def compare(plans: list[Path], base: str, runs: int, out: Path) -> int:
