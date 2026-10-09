@@ -103,10 +103,13 @@ class NewLayoutCommand(Command):
 
     def do(self, document) -> None:
         document.doc.layouts.new(self.layout_name)
+        # LAYOUTCREATEVIEWPORT: its first visit adds a viewport
+        document.uninitialized_layouts.add(self.layout_name)
         document.dirty = True
 
     def undo(self, document) -> None:
         document.doc.layouts.delete(self.layout_name)
+        document.uninitialized_layouts.discard(self.layout_name)
         document.dirty = True
 
 
@@ -363,6 +366,21 @@ def viewport_from_corners(document, layout_name: str,
     view_center, view_height = model_fit_view(document, w, h)
     return AddViewportCommand(layout_name, center, (w, h),
                               view_center, view_height)
+
+
+def first_visit_viewport(document, layout_name: str) -> Optional[AddViewportCommand]:
+    """The viewport a layout born in this session gets when first opened
+    (AutoCAD's LAYOUTCREATEVIEWPORT): one filling the printable area and
+    showing the whole model. None when the layout was visited before, came
+    with the drawing, or already has a viewport of its own (Rafael's review
+    6: a new drawing's Layout1 was a blank sheet, the model nowhere)."""
+    if layout_name not in document.uninitialized_layouts:
+        return None
+    document.uninitialized_layouts.discard(layout_name)
+    layout = document.doc.layouts.get(layout_name)
+    if layout is None or visible_viewports(layout):
+        return None
+    return viewport_fit_printable(document, layout_name)
 
 
 def viewport_fit_printable(document, layout_name: str) -> AddViewportCommand:
@@ -1136,6 +1154,10 @@ def page_setup_command(layout, width: float, height: float,
         "limmin": (-(s_left + ox), -(s_bottom + oy)),
         "limmax": (width - s_left - ox, height - s_bottom - oy),
     }
+    if getattr(layout, "is_modelspace", False):
+        # the Model tab's limits are the drawing's, in drawing units, not
+        # a sheet: its page setup only says how the model plots
+        del fields["limmin"], fields["limmax"]
     if device is not None:
         fields["plot_configuration_file"] = device
     if plot_type is not None:

@@ -146,6 +146,8 @@ def new_document(key: str = DEFAULT_TEMPLATE):
     template = by_key(key)
     document = Document.new()
     apply_to(document, template)
+    document.uninitialized_layouts.update(
+        name for name in document.doc.layouts.names() if name != "Model")
     document.dirty = False
     return document
 

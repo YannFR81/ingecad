@@ -1160,7 +1160,6 @@
   "Over the dimension line, without leader": "Sobre la línea de cota, sin directriz",
   "Overall scale": "Escala global",
   "Overline": "Sobrerrayado",
-  "PAGESETUP works on a layout tab — switch to one first.": "PAGESETUP funciona en una presentación — cambie a una primero.",
   "PAPER": "PAPEL",
   "PDF (*.pdf)": "PDF (*.pdf)",
   "PDF Page": "Página del PDF",
@@ -1877,5 +1876,8 @@
   "Current point modes:  PDMODE={mode}  PDSIZE={size:.4f}": "Modos de punto actuales:  PDMODE={mode}  PDSIZE={size:.4f}",
   "new block": "bloque nuevo",
   "DWG drawing (*.dwg);;DXF drawing (*.dxf)": "Dibujo DWG (*.dwg);;Dibujo DXF (*.dxf)",
-  "*Cancel* -- nothing was written to {path}.": "*Cancelar* — no se escribió nada en {path}."
+  "*Cancel* -- nothing was written to {path}.": "*Cancelar* — no se escribió nada en {path}.",
+  "Add Current Scale": "Añadir escala actual",
+  "Delete Current Scale": "Suprimir escala actual",
+  "Add the current annotation scale to the selected annotative objects (AIOBJECTSCALEADD)": "Añadir la escala de anotación actual a los objetos anotativos seleccionados (AIOBJECTSCALEADD)"
 }

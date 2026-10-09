@@ -108,5 +108,49 @@ class ObjectScaleTool(Tool):
         return False
 
 
+class CurrentScaleTool(Tool):
+    """AIOBJECTSCALEADD / AIOBJECTSCALEREMOVE: Modify > Annotative Object
+    Scale > Add Current Scale / Delete Current Scale. One click for the
+    usual case of OBJECTSCALE: the current annotation scale (CANNOSCALE),
+    added to or taken from the selected annotative objects (Rafael's
+    review 6: OpenCAD Studio's "Add Current Scale" button, which IngeCAD
+    lacked)."""
+
+    wants_selection = True
+    add = True
+
+    def start(self) -> None:
+        self.name = "AIOBJECTSCALEADD" if self.add else "AIOBJECTSCALEREMOVE"
+
+    def selection_prompt(self) -> str:
+        return tr("Select annotative objects:")
+
+    def on_selection(self, entities: list) -> None:
+        services = self.ctx.services
+        document = getattr(getattr(services, "window", None), "document", None)
+        chosen = [e for e in entities if annotative.is_annotative(e)]
+        if document is None or not chosen:
+            self.ctx.echo(tr("No annotative objects selected."))
+            self.ctx.finish()
+            return
+        scale = annotative.scale_or_default(document.doc)
+        command = annotative.ObjectScaleCommand(chosen, scale.name, add=self.add)
+        self.ctx.execute(command)
+        done = len(command.entities) - command.skipped
+        if self.add:
+            self.ctx.echo(tr("{n} object(s) now support {scale}.",
+                             n=done, scale=scale.name))
+        else:
+            self.ctx.echo(tr("{scale} removed from {n} object(s).",
+                             n=done, scale=scale.name))
+        self.ctx.finish()
+
+
+class RemoveCurrentScaleTool(CurrentScaleTool):
+    add = False
+
+
 ANNO_TOOL_CLASSES = {"OBJECTSCALE": ObjectScaleTool,
-                     "-OBJECTSCALE": ObjectScaleTool}
+                     "-OBJECTSCALE": ObjectScaleTool,
+                     "AIOBJECTSCALEADD": CurrentScaleTool,
+                     "AIOBJECTSCALEREMOVE": RemoveCurrentScaleTool}

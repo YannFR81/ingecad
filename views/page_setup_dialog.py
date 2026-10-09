@@ -212,7 +212,10 @@ class PageSetupDialog(QDialog):
         area_group = QGroupBox(tr("Plot area"), self)
         area_form = QFormLayout(area_group)
         self.area = QComboBox(self)
-        self.area.addItem(tr("Layout"), layout_ops.PLOT_TYPE_LAYOUT)
+        # the Model tab has no sheet to plot "as laid out" (AutoCAD offers
+        # Display / Extents / Limits / Window there)
+        if not getattr(layout, "is_modelspace", False):
+            self.area.addItem(tr("Layout"), layout_ops.PLOT_TYPE_LAYOUT)
         self.area.addItem(tr("Extents"), layout_ops.PLOT_TYPE_EXTENTS)
         self.area.addItem(tr("Display"), layout_ops.PLOT_TYPE_DISPLAY)
         try:
@@ -220,7 +223,9 @@ class PageSetupDialog(QDialog):
         except (TypeError, ValueError):
             plot_type = 5
         idx = self.area.findData(plot_type)
-        self.area.setCurrentIndex(idx if idx >= 0 else 0)
+        if idx < 0:
+            idx = self.area.findData(layout_ops.PLOT_TYPE_EXTENTS)
+        self.area.setCurrentIndex(max(idx, 0))
         self.area.currentIndexChanged.connect(self._on_area_changed)
         area_form.addRow(tr("What to plot:"), self.area)
 

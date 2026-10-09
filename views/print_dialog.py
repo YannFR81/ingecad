@@ -134,6 +134,8 @@ class PrintDialog(QDialog):
         self._pdf_btn, self._printer_btn = pdf_btn, printer_btn
         if state:
             self._restore(state)
+        elif not is_layout_tab and window.document is not None:
+            self._from_page_setup(window.document.doc.modelspace())
         self._on_area_changed()
         self._show_meaning()
 
@@ -166,6 +168,45 @@ class PrintDialog(QDialog):
         idx = self.area.findData(state.get("area"))
         if idx >= 0:
             self.area.setCurrentIndex(idx)
+
+    def _from_page_setup(self, model) -> None:
+        """Start from the Model tab's page setup (PAGESETUP there), as
+        AutoCAD's Plot dialog does: paper, orientation, area and scale."""
+        from core import layouts as layout_ops
+        from core.layouts import FLAG_USE_STANDARD_SCALE, PLOT_TYPE_DISPLAY, \
+            PLOT_TYPE_EXTENTS
+
+        dxf = model.dxf
+        if not dxf.hasattr("paper_width"):
+            return                              # never set up: the defaults
+        page = layout_ops.effective_page(model)
+        width, height = page["width"], page["height"]
+        short, long_ = sorted((width, height))
+        for i, (w, h) in enumerate(pdf_out.PAPER_SIZES_MM.values()):
+            if abs(w - short) < 0.5 and abs(h - long_) < 0.5:
+                self.paper.setCurrentIndex(i)
+                break
+        self.orientation.setCurrentIndex(self.orientation.findData(width >= height))
+        area = {PLOT_TYPE_EXTENTS: "extents",
+                PLOT_TYPE_DISPLAY: "view"}.get(int(dxf.get("plot_type", 1) or 0))
+        if area is not None:
+            self.area.setCurrentIndex(self.area.findData(area))
+        flags = int(dxf.get("plot_layout_flags", 0) or 0)
+        if flags & FLAG_USE_STANDARD_SCALE and int(dxf.get("standard_scale_type", 0) or 0) == 0:
+            self.scale.setCurrentIndex(0)       # scaled to fit
+            return
+        try:
+            target = float(dxf.get("scale_numerator", 1.0)) / float(
+                dxf.get("scale_denominator", 1.0))
+        except (TypeError, ValueError, ZeroDivisionError):
+            return
+        # "1 mm = N units" is paper mm per drawing unit: find it in the list
+        # for the drawing unit already chosen
+        for i in range(1, self.scale.count()):
+            num, den = self.scale.itemData(i)
+            if abs(self.units.currentData() * num / den - target) <= 1e-9 * max(target, 1.0):
+                self.scale.setCurrentIndex(i)
+                return
 
     def _pick_window(self) -> None:
         idx = self.area.findData("window")

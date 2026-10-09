@@ -67,6 +67,11 @@ class Document:
         #: The last PLOT dialog settings per layout name, for the session:
         #: the dialog reopens as it was left, the way AutoCAD's does.
         self.plot_settings: dict[str, dict] = {}
+        #: Layouts born in this session that were never opened: the first
+        #: visit gives them a viewport onto the model, as AutoCAD's Layout1
+        #: comes with one (LAYOUTCREATEVIEWPORT). A drawing's own layouts
+        #: are never touched: an empty sheet in a file is deliberate.
+        self.uninitialized_layouts: set[str] = set()
         #: Name of the block open in the Block Editor, or None. While set,
         #: :meth:`current_space` answers with that block's layout, so every
         #: draw/edit/snap/pick path operates on the definition without

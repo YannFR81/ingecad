@@ -1466,6 +1466,11 @@ class MainWindow(QMainWindow):
         # AutoCAD: Modify > Annotative Object Scale > Add/Delete Scales...
         # (#73: OBJECTSCALE existed and nobody could find it)
         anno_menu = modify_menu.addMenu(tr("Annotative Object Scale"))
+        cmd_item(anno_menu, tr("Add Current Scale"), "AIOBJECTSCALEADD",
+                 icon=False)
+        cmd_item(anno_menu, tr("Delete Current Scale"), "AIOBJECTSCALEREMOVE",
+                 icon=False)
+        anno_menu.addSeparator()
         cmd_item(anno_menu, tr("Add/Delete Scales..."), "OBJECTSCALE",
                  icon=False)
         cmd_item(modify_menu, tr("Explode"), "EXPLODE")
@@ -2180,6 +2185,18 @@ class MainWindow(QMainWindow):
         self._anno_scale_combo.setMaxVisibleItems(16)
         self._anno_scale_combo.activated.connect(self._on_anno_scale_combo)
         self.statusBar().addPermanentWidget(self._anno_scale_combo)
+        # One click for the selection (Rafael's review 6: the scale had to
+        # reach the selected dimensions through a dialog he never found)
+        self._anno_add_btn = QToolButton(self)
+        self._anno_add_btn.setText("+")
+        self._anno_add_btn.setStyleSheet(style)
+        self._anno_add_btn.setFocusPolicy(Qt.NoFocus)
+        self._anno_add_btn.setToolTip(
+            tr("Add the current annotation scale to the selected annotative "
+               "objects (AIOBJECTSCALEADD)"))
+        self._anno_add_btn.clicked.connect(
+            lambda _=False: self.tools.start_tool("AIOBJECTSCALEADD"))
+        self.statusBar().addPermanentWidget(self._anno_add_btn)
         self.tools.changed.connect(self._refresh_annotation_controls)
         self._refresh_annotation_controls()
 
@@ -2214,7 +2231,15 @@ class MainWindow(QMainWindow):
         current = (annotative.viewport_scale(vp) if vp is not None
                    else annotative.current_scale(doc))
         current_name = current.name if current is not None else "1:1"
-        names = [s.name for s in scales]
+        # the drawing's list plus the standard scales it lacks: a DWG from
+        # another program carries none, and Rafael's showed only 1:1
+        # (standard_scale() adds one to the drawing when it is chosen)
+        from core.units import STANDARD_SCALES, scale_text
+
+        factors = {s.name: s.factor for s in scales}
+        for num, den in STANDARD_SCALES:
+            factors.setdefault(scale_text(num, den), den / num)
+        names = sorted(factors, key=lambda n: (-factors[n], n))
         if current_name not in names:
             names.insert(0, current_name)
         for name in names:
@@ -3747,6 +3772,7 @@ class MainWindow(QMainWindow):
                      "TABLE", "PDFATTACH", "IMAGEADJUST", "TRANSPARENCY",
                      "LENGTHEN", "ALIGN", "BOUNDARY", "-BOUNDARY", "DONUT",
                      "OBJECTSCALE", "-OBJECTSCALE",
+                     "AIOBJECTSCALEADD", "AIOBJECTSCALEREMOVE",
                      "SCALETEXT", "XATTACH"):
             d.register(name, lambda *a, n=name: self.tools.start_tool(n))
         d.register("ADJUST", lambda *a: self.tools.start_tool("IMAGEADJUST"))
@@ -4430,11 +4456,10 @@ class MainWindow(QMainWindow):
         if self.document is None:
             self.new_document()
         name = self._active_layout
-        if name == "Model":
-            self.command_line.echo(
-                tr("PAGESETUP works on a layout tab — switch to one first."))
-            return
-        layout = self.document.doc.layouts.get(name)
+        # the Model tab has its page setup too: what PLOT starts from there
+        # (Rafael's review 6 tried it first and was sent to a layout)
+        layout = (self.document.doc.modelspace() if name == "Model"
+                  else self.document.doc.layouts.get(name))
         dialog = PageSetupDialog(self, layout)
         if not dialog.exec():
             return
@@ -4443,7 +4468,8 @@ class MainWindow(QMainWindow):
         self.history.execute(layout_ops.page_setup_command(
             layout, width, height, values.pop("margins"),
             values.pop("size_name"), **values))
-        self.regen_in_memory(zoom_after=True)   # the sheet changed size
+        if name != "Model":
+            self.regen_in_memory(zoom_after=True)   # the sheet changed size
         self.command_line.echo(
             tr("Page setup applied to \"{name}\": {w:g} × {h:g} mm.",
                name=name, w=width, h=height))
@@ -5107,6 +5133,9 @@ class MainWindow(QMainWindow):
         # this tab in AutoCAD too (ezdxf does not touch the header itself).
         layout_ops.switch_active(self.document, name)
         self._active_layout = name        # ... and the document's space
+        first = layout_ops.first_visit_viewport(self.document, name)
+        if first is not None:
+            self.history.execute(first)
         # Pick, snap and the overlay's curve tolerance all describe ONE
         # space; crossing tabs makes every one of them stale.
         self.tools.space_changed()
