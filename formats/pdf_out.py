@@ -123,7 +123,15 @@ def build_graphics_scene(document, layout_name: str | None = None,
 
     sheet = LayoutProperties.from_layout(layout)
     sheet.set_colors("#ffffff")
-    TolerantFrontend(context, backend).draw_layout(
+    # POINT symbols at the size the canvas shows them ($PDSIZE <= 0 is
+    # relative to the view, which ezdxf alone draws 1 unit wide)
+    from ezdxf.addons.drawing.config import Configuration
+
+    from render.backend import point_size
+
+    size = point_size(document)
+    config = Configuration() if size is None else Configuration(pdsize=size)
+    TolerantFrontend(context, backend, config).draw_layout(
         layout, finalize=False, layout_properties=sheet)
     if getattr(layout, "is_any_paperspace", False):
         # Viewport frames plot only when the page setup asks for them

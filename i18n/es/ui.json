@@ -1843,5 +1843,13 @@
   "Cannot read {file}: {error}": "No se puede leer {file}: {error}",
   "1 mm on paper = {n:g} {unit}": "1 mm en el papel = {n:g} {unit}",
   "Annotative Object Scale": "Escala de objeto anotativo",
-  "Add/Delete Scales...": "Añadir/suprimir escalas..."
+  "Add/Delete Scales...": "Añadir/suprimir escalas...",
+  "Point Style": "Estilo de punto",
+  "Point Style...": "Estilo de punto...",
+  "Point Size:": "Tamaño de punto:",
+  "Set Size Relative to Screen": "Definir tamaño relativo a la pantalla",
+  "Set Size in Absolute Units": "Definir tamaño en unidades absolutas",
+  "Enter new value for PDMODE <{current}>:": "Indique nuevo valor para PDMODE <{current}>:",
+  "Enter new value for PDSIZE <{current}>:": "Indique nuevo valor para PDSIZE <{current}>:",
+  "Invalid point display mode.": "Modo de visualización de punto no válido."
 }

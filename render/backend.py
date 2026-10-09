@@ -1122,12 +1122,45 @@ class TolerantFrontend(Frontend):
                 self.ctx.pop_state()
 
 
-def frontend_config(flatten: float) -> Configuration:
-    return Configuration(
+def point_size(document) -> Optional[float]:
+    """The size POINT symbols are drawn at, in drawing units; None leaves
+    ezdxf to read a positive $PDSIZE itself.
+
+    $PDSIZE 0 or negative is AutoCAD's size relative to the screen: 0 is 5 %
+    of the view height, -N is N %. ezdxf cannot do it (it falls back to 1
+    unit, #69: points all but invisible). As in AutoCAD the view is the one
+    of the last regeneration: the window hands its height over as
+    ``document.point_view_height`` before each regen.
+    """
+    if document is None:
+        return None
+    try:
+        value = float(document.doc.header.get("$PDSIZE", 0.0))
+    except (TypeError, ValueError):
+        value = 0.0
+    if value > 0:
+        return None
+    height = getattr(document, "point_view_height", None)
+    if not height or height <= 0:
+        # no view yet (the regen of an opening file): the saved one
+        try:
+            height = float(document.doc.viewports.get("*Active")[0].dxf.height)
+        except Exception:                  # noqa: BLE001 - no saved view
+            return None
+        if not height > 0:
+            return None
+    percent = 5.0 if value == 0 else -value
+    return height * percent / 100.0
+
+
+def frontend_config(flatten: float, document=None) -> Configuration:
+    config = Configuration(
         max_flattening_distance=flatten,
         min_hatch_line_distance=flatten * HATCH_DENSITY_REL,
         hatching_timeout=HATCHING_TIMEOUT,
     )
+    size = point_size(document)
+    return config if size is None else config.with_changes(pdsize=size)
 
 
 def _declared_extents(document) -> Optional[tuple[float, float, float, float]]:
@@ -1174,7 +1207,7 @@ def build_scene_for_entities(document: Document, entities, flatten: float,
     backend = _CornersOnlyBackend(flatten)
     context = TolerantRenderContext(document.doc)
     _apply_space_colors(context, document, canvas)
-    frontend = TolerantFrontend(context, backend, frontend_config(flatten))
+    frontend = TolerantFrontend(context, backend, frontend_config(flatten, document))
     frontend._host_document = document       # xref paths resolve from here
     frontend.hidden_handles = frozenset(hidden_handles(document))
     frontend.draw_entities(entities)
@@ -1331,7 +1364,7 @@ def build_scene(document: Document, layout_name: str | None = None, *,
         # one recipe for the serial regen and for each parallel worker
         backend = VertexBackend(flatten, groups)
         context = TolerantRenderContext(document.doc)
-        frontend = TolerantFrontend(context, backend, frontend_config(flatten))
+        frontend = TolerantFrontend(context, backend, frontend_config(flatten, document))
         frontend._host_document = document   # xref paths resolve from here
         frontend.hidden_handles = hidden
         if instancing:
@@ -1424,7 +1457,7 @@ def _build_block_scene(document: Document) -> Scene:
     # as the Model override above (ACI 7 flip, text masks).
     context.current_layout_properties.set_colors(
         window_colors.background("block_editor"))
-    frontend = TolerantFrontend(context, backend, frontend_config(flatten))
+    frontend = TolerantFrontend(context, backend, frontend_config(flatten, document))
     frontend.hidden_handles = frozenset(hidden_handles(document))
     frontend.draw_entities(block)
     scene = pack(backend.buckets, None, images=backend.images)

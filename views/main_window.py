@@ -1318,6 +1318,7 @@ class MainWindow(QMainWindow):
         item(format_menu, tr("Dimension Style..."),
              self._open_dimstyle_manager, icon="DIMSTYLE")
         format_menu.addSeparator()
+        cmd_item(format_menu, tr("Point Style..."), "DDPTYPE", icon=False)
         item(format_menu, tr("Units..."), self._units_dialog)
 
         # -- Draw -------------------------------------------------------------
@@ -3556,6 +3557,13 @@ class MainWindow(QMainWindow):
 
     def _start_regen(self) -> None:
         self._regen_rerun = False
+        # POINT symbols sized relative to the screen ($PDSIZE <= 0) take the
+        # height of the view being regenerated, as in AutoCAD (#69)
+        try:
+            x0, y0, x1, y1 = self.viewport._view_world_rect()
+            self.document.point_view_height = abs(y1 - y0)
+        except Exception:                  # noqa: BLE001 - no view yet
+            pass
         worker = RegenWorker(self.document, self._active_layout,
                              self.document.revision)
         worker.done.connect(self._on_regen_done)
@@ -3718,6 +3726,11 @@ class MainWindow(QMainWindow):
         d.register("DDUNITS", lambda *a: self._units_dialog())
         d.register("-UNITS", self._cmd_units_cli)
         d.register("LTSCALE", self._cmd_ltscale)
+        # point style (#69): the dialog and its two system variables
+        d.register("DDPTYPE", lambda *a: self._point_style_dialog())
+        d.register("PTYPE", lambda *a: self._point_style_dialog())
+        d.register("PDMODE", self._cmd_pdmode)
+        d.register("PDSIZE", self._cmd_pdsize)
         # drawing cleanup (#37): PURGE has a dialog and a prompt flow; the
         # other two need the mouse and are tools
         d.register("PURGE", self._cmd_purge_dialog)
@@ -4501,6 +4514,38 @@ class MainWindow(QMainWindow):
                "insertion scale {scale}",
                type=tr(LINEAR_NAMES.get(units.lunits, "Decimal")),
                precision=units.luprec, scale=tr(units.unit_name)))
+
+    def _point_style_dialog(self) -> None:
+        """DDPTYPE: Format > Point Style... (#69)."""
+        from core import points
+        from views.point_style_dialog import PointStyleDialog
+
+        if self.document is None:
+            self.new_document()
+        dialog = PointStyleDialog(self, self.document.doc)
+        if not dialog.exec():
+            return
+        mode, size = dialog.values()
+        self.history.execute(points.set_point_style_command(mode, size))
+        self.regen_in_memory()
+
+    def _cmd_pdmode(self, *args):
+        from core import points
+
+        if self.document is None:
+            self.new_document()
+        return points.pdmode_command(
+            self.document, self.history.execute, self.command_line.echo,
+            self.regen_in_memory, args=args)
+
+    def _cmd_pdsize(self, *args):
+        from core import points
+
+        if self.document is None:
+            self.new_document()
+        return points.pdsize_command(
+            self.document, self.history.execute, self.command_line.echo,
+            self.regen_in_memory, args=args)
 
     def _units_dialog(self, *args) -> None:
         if self.document is None:
