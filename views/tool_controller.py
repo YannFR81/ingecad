@@ -430,6 +430,9 @@ class ToolController(QObject):
         self._pending_render: list = []
         # Grip drag state: (handle, grip_index, role, SnapshotCommand).
         self._grip_drag = None
+        #: Where the hot grip was grabbed: the base point of the grip edit,
+        #: what ORTHO, POLAR and PERpendicular measure from (#60).
+        self._grip_base = None
         self._regen_timer = QTimer(self)
         self._regen_timer.setSingleShot(True)
         self._regen_timer.setInterval(400)
@@ -1825,7 +1828,7 @@ class ToolController(QObject):
             self.snap_hit = self.snap_engine.find(
                 (wx, wy), threshold_world,
                 kinds=kinds,
-                from_point=self.tool.last_point if self.tool else None,
+                from_point=self.anchor_point(),
             )
             through = self._snap_through_viewport((wx, wy), threshold_world)
             if through is not None and (
@@ -2479,7 +2482,7 @@ class ToolController(QObject):
                                     space=self.window.document.doc.modelspace())
                 self._model_snap_engine = engine
                 self._model_engine_revision = self.window.document.revision
-            anchor = self.tool.last_point if self.tool else None
+            anchor = self.anchor_point()
             if anchor is not None:
                 anchor = layout_ops.paper_to_model(vp, *anchor)
             hit = engine.find(model, threshold / scale,
@@ -2802,7 +2805,7 @@ class ToolController(QObject):
             if step:
                 wx, wy = round(wx / step) * step, round(wy / step) * step
         ortho = self.ortho_on != self.shift_held
-        anchor = self.tool.last_point if self.tool else None
+        anchor = self.anchor_point()
         if self.otrack_on and self._track_points:
             tracked = self._tracked(wx, wy, anchor, ortho)
             if tracked is not None:
@@ -2857,7 +2860,7 @@ class ToolController(QObject):
         units = getattr(self.window, "display_units", None)
         units = units() if callable(units) else None
         x, y = self.resolved_point(*self._cursor)
-        anchor = self.tool.last_point if self.tool else None
+        anchor = self.anchor_point()
         if anchor is not None:
             d = math.hypot(x - anchor[0], y - anchor[1])
             ang = math.degrees(math.atan2(y - anchor[1], x - anchor[0])) % 360.0
@@ -3067,6 +3070,7 @@ class ToolController(QObject):
             return
         snap = SnapshotCommand([entity])   # captures the pre-grab state
         self._grip_drag = (handle, index, role, snap)
+        self._grip_base = (gx, gy)
         # Hide the base-scene copy ONCE (a full-scene re-upload); from here
         # the live entity rides the cheap 1-entity overlay each frame.
         self.window.viewport.hide_handles([handle])
@@ -3076,12 +3080,22 @@ class ToolController(QObject):
             self.window.viewport.show_image(handle)
         self._refresh_overlay()
 
+    def anchor_point(self):
+        """The point ORTHO, POLAR, tracking and PERpendicular measure from:
+        the command's last point, or -- dragging a hot grip, when no command
+        runs -- where the grip was grabbed, as AutoCAD's grip STRETCH/MOVE
+        take it. Without it a grip ignored ORTHO (#60)."""
+        if self.tool is not None:
+            return self.tool.last_point
+        drag = self._grip_drag
+        if drag is not None and drag[0] != _VP_GRIP:
+            return self._grip_base
+        return None
+
     def grip_target(self, wx: float, wy: float) -> tuple[float, float]:
-        """Where the hot grip should sit: snap wins, then ortho/polar."""
-        wx, wy = self.to_space(wx, wy)
-        if self.snap_hit is not None:
-            return (self.snap_hit.x, self.snap_hit.y)
-        return (wx, wy)
+        """Where the hot grip should sit: the same order a command's point
+        takes -- object snap, grid snap, ortho, tracking, polar."""
+        return self.resolved_point(*self.to_space(wx, wy))
 
     def update_grip_drag(self, wx: float, wy: float) -> None:
         if self._grip_drag is None:
