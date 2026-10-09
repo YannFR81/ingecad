@@ -48,5 +48,35 @@ def paused():
     finally:
         with _lock:
             _paused -= 1
-            if _paused == 0:
-                gc.enable()
+            last = _paused == 0
+        if last:
+            _enable_on_gui_thread()
+
+
+def _enable_now() -> None:
+    """Switch the collector back on -- unless a worker started meanwhile."""
+    with _lock:
+        if _paused == 0:
+            gc.enable()
+
+
+def _enable_on_gui_thread() -> None:
+    """The last worker is done: turn the collector back on FROM THE GUI
+    THREAD. Enabled from the worker itself, the collection the GUI's
+    allocations had piled up meanwhile ran right there, in the worker's own
+    exit (measured: thresholds lowered, every worker type collected on its
+    way out -- regen, cache warmer, live viewport, file open), the very
+    thing this module exists to prevent. Without a running application
+    (scripts, headless tests) there is no GUI thread to hand it to."""
+    try:
+        from PySide6.QtCore import QCoreApplication, QThread, QTimer
+    except ImportError:                       # no Qt at all
+        _enable_now()
+        return
+    app = QCoreApplication.instance()
+    if app is None or QThread.currentThread() is app.thread():
+        _enable_now()
+        return
+    # queued into the GUI thread's event loop (a zero-delay single shot
+    # with a context object runs in that object's thread)
+    QTimer.singleShot(0, app, _enable_now)

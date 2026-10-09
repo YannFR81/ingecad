@@ -57,6 +57,17 @@ class _OpenWorker(QObject):
         self._path = path
 
     def run(self) -> None:
+        from core import gc_guard
+
+        # A QObject moved to its thread, not a QThread subclass: the rule
+        # "every worker runs under gc_guard.paused()" missed it, and the
+        # collector ran on this thread -- 106 collections while opening a
+        # small drawing with thresholds lowered, any of which may destroy a
+        # GUI object off the GUI thread.
+        with gc_guard.paused():
+            self._run()
+
+    def _run(self) -> None:
         from formats.dwg_bridge import DwgBridgeError, load_dwg
         from render.backend import build_scene
 
