@@ -57,7 +57,7 @@ jobs:
       - name: Tests
         env:
           QT_QPA_PLATFORM: xcb
-        run: xvfb-run -a -s "-screen 0 1600x1000x24" ./venv/bin/python -m pytest tests/ -q
+        run: scripts/run-tests-split.sh ./venv/bin/python 4
 
       - name: Build the AppImage
         run: packaging/build-appimage.sh dist

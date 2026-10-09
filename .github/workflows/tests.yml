@@ -7,6 +7,7 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,4 +34,5 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: xcb
-        run: xvfb-run -a -s "-screen 0 1600x1000x24" pytest tests/ -q
+        # four processes, each with its own Xvfb (scripts/run-tests-split.sh)
+        run: scripts/run-tests-split.sh python 4
