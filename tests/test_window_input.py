@@ -96,24 +96,22 @@ def test_a_press_on_the_border_resizes_the_frameless_window(qapp, window, monkey
 
 
 def test_double_click_on_a_layout_tab_renames_it(qapp, window, monkeypatch):
+    from PySide6.QtCore import QPointF
     from PySide6.QtGui import QMouseEvent
     from PySide6.QtWidgets import QApplication
 
     renamed = []
     monkeypatch.setattr(window, "_rename_layout_tab", renamed.append)
     layout = next(n for n in window._tab_buttons.values() if n != "Model")
-    button = next(b for b, n in window._tab_buttons.items() if n == layout)
-    at = button.mapTo(window, button.rect().center())
-    handle = window.windowHandle()
-    # As a hand does it: the first click switches to the tab and rebuilds
-    # the tabs; the second arrives after the loop turned, as a double-click.
-    # (QTest.mouseDClick sends both at once, onto the tabs just replaced.)
-    QTest.mouseClick(handle, Qt.LeftButton, Qt.NoModifier, at)
+    # As a hand does it, the first click activates the tab and rebuilds the
+    # tabs; the double-click then lands on the rebuilt button. Sent to the
+    # button itself: the CI's Xvfb has no window manager, and where a
+    # frameless window's tabs end up there is not this test's question.
+    window.switch_layout(layout)
     QTest.qWait(50)
-    # the rebuilt tabs may sit elsewhere (the active one is drawn wider)
     button = next(b for b, n in window._tab_buttons.items() if n == layout)
-    at = button.mapTo(window, button.rect().center())
-    QApplication.sendEvent(handle, QMouseEvent(
-        QEvent.MouseButtonDblClick, at, handle.mapToGlobal(at), Qt.LeftButton,
-        Qt.LeftButton, Qt.NoModifier))
+    centre = QPointF(button.rect().center())
+    QApplication.sendEvent(button, QMouseEvent(
+        QEvent.MouseButtonDblClick, centre, QPointF(button.mapToGlobal(centre.toPoint())),
+        Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
     assert renamed == [layout]
