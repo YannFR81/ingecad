@@ -70,7 +70,10 @@ def test_y_flip_top_stays_top(app):
     painter.translate(0.0, h)
     painter.scale(1.0, -1.0)
     target = QRectF(0, 0, w, h)
-    source = QRectF(0, 0, 100, 100)
+    # a margin round the 0..100 square: the base line sits ON y=0, and
+    # this test only passed while the plot's dark background made every
+    # pixel "dark" (#62)
+    source = QRectF(-5, -5, 110, 110)
     scene.render(painter, target, source)
     painter.end()
 
@@ -129,3 +132,29 @@ def test_plot_draws_a_dimension_in_the_dimensions_colour(qapp) -> None:
         if brush is not None and brush().style() != Qt.BrushStyle.NoBrush:
             colours.add(brush().color().name())
     assert colours == {"#ff0000"}
+
+
+def test_a_model_space_pdf_plots_on_white_with_dark_lines(app, tmp_path):
+    # #62: the plot kept the screen's dark model background, with ACI 7
+    # lines in white -- a plotter would have spent its ink on the page.
+    from PySide6.QtCore import QSize
+    from PySide6.QtPdf import QPdfDocument
+
+    doc = _doc_with_marker()
+    path = str(tmp_path / "model.pdf")
+    printer = pdf_out.make_pdf_printer(path, "A4", landscape=True)
+    pdf_out.plot(doc, printer, layout_name="Model")
+    pdf = QPdfDocument()
+    pdf.load(path)
+    from PySide6.QtGui import QImage, QPainter
+
+    page = pdf.render(0, QSize(600, 424))
+    img = QImage(page.size(), QImage.Format_RGB32)
+    img.fill(0xFFFFFFFF)                    # what QtPdf leaves unpainted
+    painter = QPainter(img)
+    painter.drawImage(0, 0, page)
+    painter.end()
+    pixels = [img.pixelColor(x, y).lightness()
+              for y in range(0, img.height(), 3) for x in range(0, img.width(), 3)]
+    assert sum(p > 240 for p in pixels) > 0.9 * len(pixels)    # white paper
+    assert sum(p < 80 for p in pixels) > 0                     # dark lines on it

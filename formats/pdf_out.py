@@ -119,7 +119,15 @@ def build_graphics_scene(document, layout_name: str | None = None,
     # does: a dimension's block drawn in the dimension's colour (ISO-25 is
     # ByBlock), MULTILEADER content instead of its baked proxy picture, a
     # malformed entity skipped instead of blanking the page.
-    TolerantFrontend(context, backend).draw_layout(layout, finalize=False)
+    # Paper is white: AutoCAD plots model space on white too, never on the
+    # screen's dark background, and ACI 7 follows the background to black
+    # (#62: a model-space PDF came out dark blue with white lines).
+    from ezdxf.addons.drawing.properties import LayoutProperties
+
+    sheet = LayoutProperties.from_layout(layout)
+    sheet.set_colors("#ffffff")
+    TolerantFrontend(context, backend).draw_layout(
+        layout, finalize=False, layout_properties=sheet)
     if getattr(layout, "is_any_paperspace", False):
         # Viewport frames plot only when the page setup asks for them
         # (plot_layout_flags bit 1, off by AutoCAD's own default — clean
