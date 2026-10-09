@@ -47,7 +47,6 @@
   "Aligned": "Zarovnaná kóta",
   "Diameter": "Průměr",
   "About IngeCAD": "O aplikaci IngeCAD",
-  "Free 2D CAD for Linux in the spirit of classic AutoCAD.": "Svobodný 2D CAD pro Linux v duchu klasického AutoCADu.",
   "Current layer": "Aktuální vrstva",
   "Red": "Červená",
   "Yellow": "Žlutá",
@@ -978,5 +977,6 @@
   "Column Settings": "Nastavení sloupců",
   "Column Number:": "Počet sloupců:",
   "Height:": "Výška:",
-  "Gutter:": "Mezera:"
+  "Gutter:": "Mezera:",
+  "Free 2D CAD in the spirit of classic AutoCAD.": "Svobodný 2D CAD v duchu klasického AutoCADu."
 }

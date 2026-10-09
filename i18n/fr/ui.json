@@ -856,7 +856,6 @@
   "Font for the selected characters": "Police des caractères sélectionnés",
   "Format": "Format",
   "Fractional": "Fractionnaire",
-  "Free 2D CAD for Linux in the spirit of classic AutoCAD.": "CAO 2D libre pour Linux, dans l'esprit de l'AutoCAD classique.",
   "Freehand": "À main levée",
   "Freeze": "Geler",
   "Frozen": "Gelé",
@@ -1835,5 +1834,6 @@
   "{scale} removed from {n} object(s).": "{scale} supprimée de {n} objet(s).",
   "{s} s": "{s} s",
   "{option} is not available in IngeCAD; Mtext or None.": "{option} n'est pas disponible dans IngeCAD ; Mtexte ou Aucune.",
-  "{prompt} <{default}>:": "{prompt} <{default}> :"
+  "{prompt} <{default}>:": "{prompt} <{default}> :",
+  "Free 2D CAD in the spirit of classic AutoCAD.": "CAO 2D libre, dans l'esprit de l'AutoCAD classique."
 }
