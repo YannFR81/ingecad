@@ -45,6 +45,41 @@ def _no_modal_close_prompt(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _let_closed_windows_go():
+    """A closed MainWindow deletes itself (WA_DeleteOnClose), but only when
+    the event loop next turns -- and a test that closes its window last
+    never turns it, while others never close theirs. Close what is left and
+    turn the loop once after each test, so no window lives on into the next
+    one: kept alive, they piled up (63 windows, 1 GB after 135 tests) and
+    every later processEvents walked them all.
+    """
+    yield
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    app = widgets.QApplication.instance() if widgets is not None else None
+    if app is None:
+        return
+    window_module = sys.modules.get("views.main_window")
+    if window_module is not None:
+        # and the windows a test never closed: closed here, without the
+        # unsaved-changes question (no test is asking it any more)
+        for w in app.topLevelWidgets():
+            if isinstance(w, window_module.MainWindow):
+                w.maybe_save_changes = lambda: True
+                w.close()
+    app.processEvents()
+    if window_module is not None:
+        # What is still there was never shown (close() deletes only a shown
+        # window; the application always shows its own) or was closed
+        # outside a running event loop, where deleteLater waits for an
+        # exec() that tests never start. Delete those now.
+        import shiboken6
+
+        for w in app.topLevelWidgets():
+            if isinstance(w, window_module.MainWindow) and shiboken6.isValid(w):
+                shiboken6.delete(w)
+
+
 _EXIT_STATUS = [0]
 
 
@@ -62,6 +97,10 @@ def pytest_unconfigure(config):
     exit cleanly, and so does the real application -- opened a real plan,
     edited a block, closed, full teardown, exit 0 on offscreen and xcb alike.
     So this is a pytest-environment artifact, not a defect a user can reach.
+
+    (Since 2026-10-09 closed windows are really deleted -- WA_DeleteOnClose
+    and _let_closed_windows_go above -- so few are left at exit; the exit
+    stays skipped, it costs nothing.)
 
     Two better-looking fixes were tried and measured worse. Reaping windows
     per test made the double free DETERMINISTIC (and broke the tidy tests'

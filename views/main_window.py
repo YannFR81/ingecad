@@ -274,6 +274,13 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        # Closing a window destroys it. Without this close() only hid it,
+        # and the lambdas its menus and toolbars connect to its signals
+        # live on the C++ side, out of the collector's reach: every closed
+        # window stayed in memory with its thousands of widgets. 135 tests
+        # left 63 windows and 1 GB behind, and every later processEvents
+        # walked them -- why v0.6.5's CI ran 3.4x longer than v0.6.4's.
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.document: Document | None = None
         self._regen_worker: RegenWorker | None = None
         self._regen_rerun = False
