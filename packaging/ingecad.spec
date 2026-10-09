@@ -10,6 +10,7 @@
 # on a tmpfs desktop means a quarter gigabyte of RAM and a visible delay each
 # time. The AppImage already gives the single-file experience.
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(os.environ.get("INGECAD_ROOT", os.getcwd())).resolve()
@@ -28,9 +29,13 @@ datas = [
 # They are statically linked against libredwg (ldd shows only libc and libm),
 # so nothing else has to come along. The other ten programs in vendor/bin are
 # never invoked by IngeCAD and would add ~118 MB.
+# Windows (#28): the same two, cross-built with mingw and linked statically
+# (libiconv included), so they too come alone -- see .github/workflows/
+# build-windows.yml.
+WINDOWS = sys.platform == "win32"
 binaries = []
 for tool in ("dwg2dxf", "dxf2dwg"):
-    path = ROOT / "vendor" / "libredwg" / "bin" / tool
+    path = ROOT / "vendor" / "libredwg" / "bin" / (tool + (".exe" if WINDOWS else ""))
     if not path.is_file():
         raise SystemExit(
             f"missing {path}\n"
@@ -117,9 +122,8 @@ exe = EXE(
     strip=False,
     upx=False,          # upx breaks Qt plugin loading often enough not to risk it
     console=False,      # a GUI app; errors go to the terminal when run from one
-    icon=str(ROOT / "resources" / "icons" / "ingecad.png")
-    if (ROOT / "resources" / "icons" / "ingecad.png").is_file()
-    else None,
+    # Windows wants an .ico for the executable; elsewhere it is ignored
+    icon=str(ROOT / "resources" / "icons" / ("ingecad.ico" if WINDOWS else "ingecad.png")),
 )
 coll = COLLECT(
     exe,

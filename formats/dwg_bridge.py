@@ -14,6 +14,7 @@ support arrives with LibreDWG Track L progress (no proprietary satellite).
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -31,11 +32,23 @@ class DwgBridgeError(Exception):
 
 
 def _find_tool(name: str) -> Optional[Path]:
-    bundled = _VENDOR_BIN / name
+    # Windows: the converters are dwg2dxf.exe and so on (#28)
+    exe = name + ".exe" if os.name == "nt" else name
+    bundled = _VENDOR_BIN / exe
     if bundled.is_file():
         return bundled
     system = shutil.which(name)
     return Path(system) if system else None
+
+
+def quiet_process() -> dict:
+    """subprocess keywords for a console program run from the GUI: on
+    Windows, without CREATE_NO_WINDOW every conversion flashes a black
+    terminal window (#28). Nothing elsewhere."""
+    if os.name == "nt":
+        # the constant only exists in Windows' subprocess; its documented value
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+    return {}
 
 
 def find_dwg2dxf() -> Optional[Path]:
@@ -83,6 +96,7 @@ def _run(cmd: list[str], out_path: Path) -> str:
             errors="replace",
             timeout=_TIMEOUT,
             check=False,
+            **quiet_process(),
         )
     except subprocess.TimeoutExpired as exc:
         raise DwgBridgeError(f"converter timed out: {' '.join(cmd)}") from exc
