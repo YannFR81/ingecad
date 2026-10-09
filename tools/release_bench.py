@@ -110,6 +110,13 @@ def run_one(src: Path, out: Path, tree: str) -> dict:
         app.processEvents()
         vp.grabFramebuffer()
 
+    def empty_paint() -> float:
+        t = time.perf_counter()
+        vp.update()
+        app.processEvents()
+        vp.grabFramebuffer()
+        return time.perf_counter() - t
+
     def timed(key, fn):
         t = time.monotonic()
         gap["last"], gap["worst"] = time.monotonic(), 0.0
@@ -121,6 +128,12 @@ def run_one(src: Path, out: Path, tree: str) -> dict:
             # loop turning (Ctrl+S's local loop) is not a freeze
             res[key] = {"total": round(time.monotonic() - t, 2),
                         "freeze": round(gap["worst"], 2)}
+            # the compositor can start pacing mid-run (the window covered
+            # or the screen blanked): the 0.6.6 bench read exact 1.00 s
+            # steps in both trees, all of them waiting in the GL swap. An
+            # empty paint after each action says whether this sample counts.
+            if empty_paint() > PAINT_LIMIT:
+                res[key]["paced"] = True
         except Exception as exc:  # noqa: BLE001 - a failure IS a result
             res[key] = f"FAIL {type(exc).__name__}: {str(exc)[:80]}"
             settle()
@@ -132,13 +145,7 @@ def run_one(src: Path, out: Path, tree: str) -> dict:
     # action reads 1.00, 2.00, 3.00 s, in both trees alike (2026-10-09, the
     # 0.6.6 bench run while Marco was away). Measure a few empty paints
     # first and say so, rather than report the compositor as freezes.
-    paints = []
-    for _ in range(5):
-        t = time.perf_counter()
-        vp.update()
-        app.processEvents()
-        vp.grabFramebuffer()
-        paints.append(time.perf_counter() - t)
+    paints = [empty_paint() for _ in range(5)]
     res["paint_s"] = round(statistics.median(paints), 3)
     timed("open", lambda: win.open_path(src))
     res["entities"] = len(win.document.modelspace())
@@ -255,8 +262,13 @@ def _child(tree_dir: Path, name: str, plan: Path, out: Path) -> None:
 
 
 def _value(row, key):
+    """A sample that counts: measured, and not paced by the compositor."""
     v = row.get(key)
-    return v if isinstance(v, dict) else None
+    return v if isinstance(v, dict) and not v.get("paced") else None
+
+
+def _paced(rows, key) -> int:
+    return sum(1 for r in rows if isinstance(r.get(key), dict) and r[key].get("paced"))
 
 
 def _median(rows, key, field):
@@ -286,6 +298,9 @@ def report(results: dict[str, dict[str, list]], base: str) -> int:
             fails = sorted({str(r[key]) for r in head if isinstance(r.get(key), str)})
             cell = lambda t, f: "—" if t is None else f"{t:.2f} ({f:.2f})"
             mark = ""
+            paced = _paced(old, key) + _paced(head, key)
+            if paced:
+                mark = f"  ({paced} paced sample(s) left out)"
             if fails:
                 mark = "  FAIL " + fails[0]
             elif hf is not None and hf > FREEZE_LIMIT:
@@ -293,7 +308,7 @@ def report(results: dict[str, dict[str, list]], base: str) -> int:
             elif (ht is not None and bt is not None and ht > bt * SLOWER
                     and ht - bt > SLOWER_ABS):
                 mark = f"  ⚠ slower than {base}"
-            flags += bool(mark)
+            flags += bool(mark) and not mark.startswith("  (")
             print(f"  {label:<20}{cell(bt, bf):>18}{cell(ht, hf):>18}{mark}")
         for key in ("frame_ms", "hover_ms"):
             b = [r[key]["med"] for r in old if key in r]
@@ -309,8 +324,9 @@ def compare(plans: list[Path], base: str, runs: int, out: Path) -> int:
     base_dir = _worktree(base)
     results: dict[str, dict[str, list]] = {}
     for plan in plans:
-        for name, tree in ((base, base_dir), ("HEAD", ROOT)):
-            for _ in range(runs):
+        # alternated, so a spell of a paced display hits both trees alike
+        for _ in range(runs):
+            for name, tree in ((base, base_dir), ("HEAD", ROOT)):
                 before = out.read_text().count("\n") if out.exists() else 0
                 _child(tree, name, plan, out)
                 lines = out.read_text().splitlines() if out.exists() else []
