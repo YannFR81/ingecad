@@ -7,7 +7,8 @@ the canvas: click the grip, move, click."""
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 
 from core import actions
@@ -35,7 +36,14 @@ def _grab_move_drop(qapp, win, grip, via, drop):
     qapp.processEvents()
     assert win.tools._grip_drag is not None, "the grip did not get hot"
     for x, y in (via, drop):
-        QTest.mouseMove(vp, _screen(win, x, y))
+        # the viewport's own move handler, not QTest.mouseMove: under xcb
+        # (the CI) that moves the real pointer and the event lands later,
+        # after the click -- which then dropped the end unsnapped
+        pos = QPointF(_screen(win, x, y))
+        vp.mouseMoveEvent(QMouseEvent(
+            QEvent.Type.MouseMove, pos, vp.mapToGlobal(pos),
+            Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier))
         qapp.processEvents()
     QTest.mouseClick(vp, Qt.MouseButton.LeftButton, pos=_screen(win, *drop))
     qapp.processEvents()

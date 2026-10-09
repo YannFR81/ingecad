@@ -83,8 +83,13 @@ _ORPHANS: set = set()
 
 
 def _park_orphan(worker) -> None:
+    # Finished ones are let go here, on the GUI thread. A lambda on the
+    # worker's own `finished` ran ON the worker's thread (PySide calls a
+    # plain callable in the emitter's thread) and dropped the last
+    # reference to the QThread from inside it.
+    for done in [w for w in _ORPHANS if w.isFinished()]:
+        _ORPHANS.discard(done)
     _ORPHANS.add(worker)
-    worker.finished.connect(lambda w=worker: _ORPHANS.discard(w))
 
 
 def drain_orphans() -> None:

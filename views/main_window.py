@@ -1753,14 +1753,12 @@ class MainWindow(QMainWindow):
             QUrl("https://github.com/ingelibre/ingecad/issues/new/choose"))
 
     def _show_about(self) -> None:
-        from PySide6.QtWidgets import QMessageBox
         from core.version import __version__
+        from views.about_dialog import AboutDialog
 
-        QMessageBox.about(
-            self, tr("About IngeCAD"),
-            f"IngeCAD {__version__}\n"
-            + tr("Free 2D CAD for Linux in the spirit of classic AutoCAD.")
-            + "\nGPL-3.0-or-later · Marco Sumari Tellez")
+        dialog = AboutDialog(self, __version__)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.exec()
 
     def _set_language(self, code: str) -> None:
         """Switch the UI language, persist it, and retranslate live."""
@@ -5880,7 +5878,11 @@ class MainWindow(QMainWindow):
         worker = _OpenWorker(path)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.phase.connect(lambda text: self._loading_phase(tr(text)))
+        # a bound method of this window, never a lambda: PySide runs a plain
+        # callable in the EMITTER's thread, and the loading window's label
+        # was being set from the open thread (the CI's segfaults and bus
+        # errors in test_cancel_abandons_the_open)
+        worker.phase.connect(self._on_open_phase)
         worker.done.connect(self._on_open_done)
         worker.failed.connect(self._on_open_failed)
         worker.done.connect(thread.quit)
@@ -5890,6 +5892,9 @@ class MainWindow(QMainWindow):
         self._open_thread = thread
         self._open_worker = worker  # keep alive while the thread runs
         gc_guard.start(thread)
+
+    def _on_open_phase(self, text: str) -> None:
+        self._loading_phase(tr(text))
 
     def _cancel_open(self) -> None:
         """Cancel on the loading window: the worker cannot be stopped
