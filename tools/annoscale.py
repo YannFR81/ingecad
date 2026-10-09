@@ -87,7 +87,7 @@ class ObjectScaleTool(Tool):
                 self.ctx.echo(tr("Named scales: {names}", names=", ".join(names)))
                 self._scale_prompt()
                 return True
-            scale = annotative.find_scale(document.doc, stripped)
+            scale = annotative.standard_scale(document.doc, stripped)
             if scale is None:
                 self.ctx.echo(tr("Scale \"{name}\" is not in the drawing's "
                                  "scale list.", name=stripped))

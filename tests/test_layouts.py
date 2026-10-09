@@ -1437,3 +1437,25 @@ def test_move_or_copy_from_the_tab_menu(qapp):
     finally:
         win.document.dirty = False
         win.close()
+
+
+def test_the_viewport_scale_brings_its_annotation_scale_along(qapp):
+    # #73 (Rafael): viewports at 1:1, 1:2, 1:5 drew annotative text at
+    # different sizes -- the viewport scale changed only the zoom and left
+    # the annotation scale at 1:1. AutoCAD keeps them in step; one undo.
+    from core import annotative
+
+    win, t, vp = _layout_window(qapp)
+    t._pick_tolerance = 2.0
+    t.on_click(60.0, 100.0)                     # select the viewport
+    combo = win._vp_scale_combo
+    win._refresh_vp_scale_combo()
+    target = next(i for i in range(combo.count()) if combo.itemData(i) == (1, 5))
+    before = annotative.viewport_scale(vp)
+    win._on_vp_scale_combo(target)
+    assert layout_ops.viewport_scale(vp) == pytest.approx(1.0 / 5.0)
+    assert annotative.viewport_scale(vp).name == "1:5"
+    win._cmd_undo()
+    assert annotative.viewport_scale(vp) == before
+    assert layout_ops.viewport_scale(vp) != pytest.approx(1.0 / 5.0)
+    win.close()

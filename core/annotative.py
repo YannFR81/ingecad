@@ -527,6 +527,30 @@ def default_scale(doc) -> Scale:
     return ensure_scale(doc, "1:1", 1.0, 1.0)
 
 
+def seed_standard_scales(doc) -> None:
+    """A new drawing's scale list, as AutoCAD's templates carry one (#73:
+    IngeCAD's started empty, so only 1:1 was ever offered): the same list
+    PLOT and PAGESETUP offer, core.units.STANDARD_SCALES."""
+    from core.units import STANDARD_SCALES, scale_text
+
+    for num, den in STANDARD_SCALES:
+        ensure_scale(doc, scale_text(num, den), num, den)
+
+
+def standard_scale(doc, name: str) -> Optional[Scale]:
+    """``name`` from the drawing's scale list; a standard scale the list
+    lacks (a DXF from another program carries none) is added on use."""
+    found = find_scale(doc, name)
+    if found is not None:
+        return found
+    from core.units import STANDARD_SCALES, scale_text
+
+    for num, den in STANDARD_SCALES:
+        if scale_text(num, den) == name.strip():
+            return ensure_scale(doc, name.strip(), num, den)
+    return None
+
+
 def scale_or_default(doc) -> Scale:
     """CANNOSCALE, or 1:1 when the drawing never set one."""
     return current_scale(doc) or default_scale(doc)

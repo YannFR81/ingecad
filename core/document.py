@@ -110,6 +110,10 @@ class Document:
         # AutoCAD's templates: MIRROR keeps text readable. ezdxf's own
         # default is 1 (mirror writing).
         document.doc.header["$MIRRTEXT"] = 0
+        # and their scale list (annotation scales, viewport scales)
+        from core import annotative
+
+        annotative.seed_standard_scales(document.doc)
         return document
 
     @classmethod

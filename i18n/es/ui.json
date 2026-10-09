@@ -1841,5 +1841,7 @@
   "Select Drawing File": "Seleccionar archivo de dibujo",
   "Block {name} is already defined; inserting it.": "El bloque {name} ya está definido; se inserta ese.",
   "Cannot read {file}: {error}": "No se puede leer {file}: {error}",
-  "1 mm on paper = {n:g} {unit}": "1 mm en el papel = {n:g} {unit}"
+  "1 mm on paper = {n:g} {unit}": "1 mm en el papel = {n:g} {unit}",
+  "Annotative Object Scale": "Escala de objeto anotativo",
+  "Add/Delete Scales...": "Añadir/suprimir escalas..."
 }

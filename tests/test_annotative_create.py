@@ -329,3 +329,62 @@ def test_the_dimension_style_dialog_offers_annotative(qapp):
     props = dlg.result_props()
     assert props["annotative"] is True and props["dimscale"] == 0.0
     dlg.deleteLater()
+
+
+def test_a_new_drawing_carries_autocads_scale_list():
+    # #73 (Rafael): a new drawing's scale list was empty, so 1:1 was the
+    # only scale ever offered to dimensions and viewports
+    names = {s.name for s in A.scale_list(Document.new().doc)}
+    assert {"1:1", "1:2", "1:5", "1:10", "1:50", "1:100", "2:1", "5:1"} <= names
+
+
+def test_a_drawing_without_a_scale_list_takes_a_standard_scale_on_use(qapp, tmp_path):
+    # a DXF from another program has no ACAD_SCALELIST: OBJECTSCALE with
+    # 1:5 answered "not in the drawing's scale list"
+    from core import actions
+    from views.main_window import MainWindow
+
+    bare = ezdxf.new("R2018")
+    bare.saveas(tmp_path / "bare.dxf")
+    win = MainWindow()
+    win.maybe_save_changes = lambda: True
+    try:
+        win.open_path(tmp_path / "bare.dxf")
+        while win._open_thread is not None:
+            qapp.processEvents()
+        doc = win.document.doc
+        assert A.scale_list(doc) == []
+        style = doc.header.get("$TEXTSTYLE", "Standard")
+        A.set_style_annotative(doc.styles.get(style), True)
+        win.tools._execute(actions.add_text((0, 0), "A", 2.5))
+        text = [e for e in doc.modelspace() if e.dxftype() == "TEXT"][-1]
+        win.tools.selection = {text.dxf.handle}
+        win._on_command_submitted("-OBJECTSCALE")
+        win._on_command_submitted("A")
+        win._on_command_submitted("1:5")
+        assert "1:5" in {r.scale.name for r in A.representations(text)}
+        assert A.find_scale(doc, "1:5").drawing == pytest.approx(5.0)
+    finally:
+        win.document.dirty = False
+        win.close()
+
+
+def test_objectscale_is_in_the_modify_menu(qapp):
+    # AutoCAD: Modify > Annotative Object Scale > Add/Delete Scales...
+    from core.i18n import tr
+
+    win = _window(qapp)
+    try:
+        # PySide: hold every action and menu in a local while it is used
+        bar = win._menu_bar.actions()
+        modify_action = next(a for a in bar
+                             if a.text().replace("&", "") == tr("Modify"))
+        modify = modify_action.menu()
+        items = modify.actions()
+        anno_action = next(a for a in items if a.text().replace("&", "")
+                           == tr("Annotative Object Scale"))
+        anno = anno_action.menu()
+        entries = [a.text() for a in anno.actions()]
+        assert tr("Add/Delete Scales...") in entries
+    finally:
+        win.close()

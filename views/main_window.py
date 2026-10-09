@@ -1435,6 +1435,11 @@ class MainWindow(QMainWindow):
         cmd_item(attribute_menu, tr("Block Attribute Manager..."), "BATTMAN",
                  icon=False)
         cmd_item(attribute_menu, tr("Synchronize"), "ATTSYNC", icon=False)
+        # AutoCAD: Modify > Annotative Object Scale > Add/Delete Scales...
+        # (#73: OBJECTSCALE existed and nobody could find it)
+        anno_menu = modify_menu.addMenu(tr("Annotative Object Scale"))
+        cmd_item(anno_menu, tr("Add/Delete Scales..."), "OBJECTSCALE",
+                 icon=False)
         cmd_item(modify_menu, tr("Explode"), "EXPLODE")
 
         # -- Tools ------------------------------------------------------------
@@ -2191,15 +2196,12 @@ class MainWindow(QMainWindow):
         if self.document is None:
             return False
         doc = self.document.doc
-        if annotative.find_scale(doc, name) is None:
-            if name == "1:1":
-                annotative.default_scale(doc)
-            else:
-                self.command_line.echo(
-                    tr("Scale \"{name}\" is not in the drawing's scale list.",
-                       name=name))
-                self._refresh_annotation_controls()
-                return False
+        if annotative.standard_scale(doc, name) is None:
+            self.command_line.echo(
+                tr("Scale \"{name}\" is not in the drawing's scale list.",
+                   name=name))
+            self._refresh_annotation_controls()
+            return False
         vp, editable = self._annotation_target()
         if not editable:
             self.command_line.echo(
@@ -3005,9 +3007,26 @@ class MainWindow(QMainWindow):
             return
         num, den = data
         self._vp_gesture_commit()
-        self.history.execute(layout_ops.xp_zoom_command(vp, num / den))
+        zoom = layout_ops.xp_zoom_command(vp, num / den)
+        # AutoCAD keeps a viewport's annotation scale in step with its scale:
+        # left at 1:1, a 1:5 viewport drew its annotative text five times
+        # too small next to a 1:1 one (#73). One undo step for both.
+        from core import annotative
+        from core.commands import CompositeCommand
+        from core.units import scale_text
+
+        scale = annotative.standard_scale(self.document.doc, scale_text(num, den))
+        if scale is not None:
+            command = CompositeCommand("VPSCALE", [
+                zoom, annotative.SetAnnotationScaleCommand(
+                    scale.name, viewport=vp,
+                    autoscale=self.annoautoscale() > 0)])
+        else:
+            command = zoom
+        self.history.execute(command)
         self.command_line.echo(tr("Viewport scale set to {scale}.",
                                   scale=layout_ops.scale_label(num / den)))
+        self.invalidate_vp_model_cache()
         self.regen_in_memory()
         self._refresh_vp_scale_combo()
 
