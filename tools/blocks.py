@@ -61,16 +61,48 @@ class InsertTool(Tool):
         self._verify_pass = False
         self._text_state = False
         names = self.ctx.services.block_names() if self.ctx.services else []
-        if not names:
-            self.ctx.echo(tr("No blocks defined."))
-            self.ctx.finish()
-            return
-        chosen = self.ctx.ask_choice(tr("Insert block:"), names, names[0])
+        # AutoCAD's Insert dialog: the defined blocks, or Browse... for a
+        # drawing file (#70: with no block defined there was no way on)
+        browse = tr("Browse...")
+        chosen = self.ctx.ask_choice(tr("Insert block:"), names + [browse],
+                                     names[0] if names else browse)
+        if chosen == browse:
+            chosen = self._block_from_file()
         if not chosen:
             self.ctx.finish()
             return
         self._block_name = chosen
         self.prompt("Specify insertion point [Scale/Rotate]:")
+
+    def _block_from_file(self) -> str | None:
+        """Browse...: define the chosen drawing as a block named after it, or
+        take the block of that name if the drawing already has one."""
+        from pathlib import Path
+
+        from core import xrefs
+
+        pick = getattr(self.ctx.services, "pick_drawing_file", None)
+        filename = pick() if callable(pick) else ""
+        if not filename:
+            return None
+        path = Path(filename)
+        document = getattr(self.ctx.services, "document", None)
+        if document is None:
+            document = getattr(getattr(self.ctx.services, "window", None),
+                               "document", None)
+        name = path.stem
+        if document is not None and name in document.doc.blocks:
+            self.ctx.echo(tr("Block {name} is already defined; inserting it.",
+                             name=name))
+            return name
+        try:
+            source = xrefs.read_drawing(path)
+        except Exception as exc:          # noqa: BLE001 - unreadable file
+            self.ctx.echo(tr("Cannot read {file}: {error}",
+                             file=path.name, error=exc))
+            return None
+        self.ctx.execute(actions.DefineBlockFromFileCommand(name, source))
+        return name
 
     def on_option(self, text: str) -> bool:
         # The resolver first: it turns the localized keyword, or

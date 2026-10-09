@@ -1122,6 +1122,14 @@ class ToolController(QObject):
             if not b.name.startswith("*")
             and not would_recurse(document, b.name, editing))
 
+    def pick_drawing_file(self) -> str:
+        """INSERT ▸ Browse: AutoCAD's Select Drawing File dialog."""
+        from views import file_dialogs
+
+        return file_dialogs.get_open_file(
+            self.window, tr("Select Drawing File"),
+            tr("Drawings (*.dwg *.dxf);;All files (*)"))
+
     def _on_prompt(self, text: str) -> None:
         """A tool's prompt: to the command window, and remembered for the
         dynamic-input tooltip beside the cursor."""

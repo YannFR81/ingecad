@@ -1049,6 +1049,40 @@ def create_block(block_name, base_point, entities) -> CreateBlockCommand:
     return CreateBlockCommand(block_name, base_point, entities)
 
 
+class DefineBlockFromFileCommand(Command):
+    """INSERT ▸ Browse (#70): another drawing becomes a block definition
+    named after its file -- its model space, with every layer, style and
+    nested block it needs, its $INSBASE as the base point (AutoCAD's own
+    rule for inserting a drawing)."""
+
+    name = "INSERT"
+
+    def __init__(self, block_name: str, source_document) -> None:
+        self.block_name = block_name
+        self.source = source_document
+        self._defined = False
+
+    def do(self, document) -> None:
+        from ezdxf import xref
+
+        doc = document.doc
+        src = self.source.doc
+        base = src.header.get("$INSBASE", (0, 0, 0))
+        block = doc.blocks.new(name=self.block_name, base_point=base)
+        loader = xref.Loader(src, doc, conflict_policy=xref.ConflictPolicy.KEEP)
+        loader.load_modelspace(target_layout=block)
+        loader.execute()
+        self._defined = True
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        doc = document.doc
+        if self._defined and self.block_name in doc.blocks:
+            doc.blocks.delete_block(self.block_name, safe=False)
+            self._defined = False
+        document.dirty = True
+
+
 def insert_block(name, point, xscale=1.0, yscale=None,
                  rotation=0.0) -> AddEntityCommand:
     ys = xscale if yscale is None else yscale

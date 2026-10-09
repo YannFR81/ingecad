@@ -160,17 +160,23 @@ def load(path: Path):
         return _load_locked(path, key)
 
 
+def read_drawing(path: Path):
+    """Another drawing file, DWG or DXF, read as a Document (raises when it
+    cannot be read). What an xref shows and what INSERT ▸ Browse defines."""
+    from core.document import Document
+
+    path = Path(path)
+    if path.suffix.lower() == ".dwg":
+        from formats.dwg_bridge import load_dwg
+
+        return load_dwg(path)
+    return Document.load(path)
+
+
 def _load_locked(path: Path, key):
     _LOADING.add(str(path))
     try:
-        from core.document import Document
-
-        if path.suffix.lower() == ".dwg":
-            from formats.dwg_bridge import load_dwg
-
-            document = load_dwg(path)
-        else:
-            document = Document.load(path)
+        document = read_drawing(path)
     except Exception as exc:                 # noqa: BLE001 - unreadable: not found
         import logging
 

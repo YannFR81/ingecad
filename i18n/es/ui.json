@@ -1836,5 +1836,9 @@
   "{scale} removed from {n} object(s).": "{scale} quitada de {n} objeto(s).",
   "{s} s": "{s} s",
   "{option} is not available in IngeCAD; Mtext or None.": "{option} no está disponible en IngeCAD; textoM o Ninguna.",
-  "{prompt} <{default}>:": "{prompt} <{default}>:"
+  "{prompt} <{default}>:": "{prompt} <{default}>:",
+  "Browse...": "Examinar...",
+  "Select Drawing File": "Seleccionar archivo de dibujo",
+  "Block {name} is already defined; inserting it.": "El bloque {name} ya está definido; se inserta ese.",
+  "Cannot read {file}: {error}": "No se puede leer {file}: {error}"
 }

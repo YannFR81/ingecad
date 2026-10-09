@@ -386,3 +386,43 @@ def test_a_second_caller_waits_for_a_load_in_flight(tmp_path, monkeypatch):
     worker.join(5)
     assert second is not None, "a load in flight read as not found"
     assert first and first[0] is second
+
+
+def test_insert_browses_for_a_dwg_and_the_block_survives_save(qapp, tmp_path):
+    # #70: INSERT answered "No blocks defined" -- no way to insert another
+    # drawing (Rafael's DWG title block). Browse... defines it as a block
+    # named after the file, and it must still be there after Save as DWG.
+    from formats.dwg_bridge import find_dwg2dxf, find_dxf2dwg, load_dwg
+    from views.main_window import MainWindow
+
+    if find_dxf2dwg() is None or find_dwg2dxf() is None:
+        pytest.skip("LibreDWG not available")
+    title = ezdxf.new("R2018")
+    title.layers.add("MARCO", color=3)
+    title.modelspace().add_lwpolyline(
+        [(0, 0), (297, 0), (297, 210), (0, 210)], close=True,
+        dxfattribs={"layer": "MARCO"})
+    Document(title).save_as(tmp_path / "FormatoA4_horizontal.dwg")
+
+    win = MainWindow()
+    win.new_document("m")
+    win.maybe_save_changes = lambda: True
+    asked = []
+    win.tools._ask_choice = lambda prompt, items, default="": asked.append(items) or items[-1]
+    win.tools.pick_drawing_file = lambda: str(tmp_path / "FormatoA4_horizontal.dwg")
+    try:
+        win._invoke_command("INSERT")
+        win.tools.on_text("10,20")
+        out = tmp_path / "prueba.dwg"
+        win.document.save_as(out)
+    finally:
+        win.document.dirty = False
+        win.close()
+    assert asked and asked[0][-1] == "Browse..."
+    back = load_dwg(out).doc
+    block = back.blocks.get("FormatoA4_horizontal")
+    assert block is not None and [e.dxftype() for e in block] == ["LWPOLYLINE"]
+    assert "MARCO" in back.layers
+    inserts = back.modelspace().query("INSERT")
+    assert [(i.dxf.name, i.dxf.insert.x, i.dxf.insert.y) for i in inserts] \
+        == [("FormatoA4_horizontal", 10, 20)]
