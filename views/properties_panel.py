@@ -435,6 +435,23 @@ def _lwpolyline_rows(panel, e):
     return (tr("Geometry"), rows)
 
 
+
+def _annotative_row(panel):
+    """AutoCAD's Annotative property (#73): make existing texts and
+    dimensions annotative, so OBJECTSCALE can give them more scales."""
+    from core import annotative
+
+    def apply(value):
+        ents = panel._active()
+        if ents:
+            panel.window.history.execute(
+                annotative.AnnotativePropertyCommand(ents, bool(value)))
+            panel.window.regen_in_memory()
+
+    return Row(tr("Annotative"), "combo",
+               lambda e: 1 if annotative.is_annotative(e) else 0, apply,
+               [(tr("No"), 0), (tr("Yes"), 1)])
+
 def _text_rows(panel, e):
     def set_justify(v):
         # #77: the letters stay put; only the alignment point moves
@@ -463,6 +480,7 @@ def _text_rows(panel, e):
         Row(tr("Obliquing"), "num", lambda e: e.dxf.get("oblique", 0.0),
             lambda v: panel._set_prop("oblique", v)),
     ]
+    rows.append(_annotative_row(panel))
     rows += _pt_rows(panel, "insert", tr("Position"))
     return (tr("Text"), rows)
 
@@ -483,6 +501,7 @@ def _mtext_rows(panel, e):
         Row(tr("Width"), "num", lambda e: e.dxf.get("width", 0.0),
             lambda v: panel._set_prop("width", v)),
     ]
+    rows.append(_annotative_row(panel))
     rows += _pt_rows(panel, "insert", tr("Position"))
     return (tr("Text"), rows)
 
@@ -596,6 +615,7 @@ def _dimension_rows(panel, e):
             lambda v: panel._set_prop("text_rotation", v)),
     ]
     rows += _pt_rows(panel, "text_midpoint", tr("Text position"))
+    rows.append(_annotative_row(panel))
     return (tr("Dimension"), rows)
 
 

@@ -388,3 +388,52 @@ def test_objectscale_is_in_the_modify_menu(qapp):
         assert tr("Add/Delete Scales...") in entries
     finally:
         win.close()
+
+
+def test_existing_dimensions_become_annotative_from_properties(qapp):
+    # #73, Rafael (review 6, 44:00-47:00): dimensions drawn first, the
+    # styles made annotative after -- the dimensions kept their plain size
+    # and OBJECTSCALE said "no annotative objects". AutoCAD's way is the
+    # Annotative property; then OBJECTSCALE adds the other scales.
+    from core import actions
+    from core.i18n import tr
+
+    win = _window(qapp)
+    try:
+        document = win.document
+        doc = document.doc
+        A.set_current_scale(doc, A.standard_scale(doc, "1:1"))
+        dims = []
+        for x in (0, 200):
+            cmd = actions.dim_linear((x, 0), (x + 100, 0), (x + 50, 20))
+            win.tools._execute(cmd)
+            dims.append(cmd.dim)
+        style = doc.dimstyles.get(dims[0].dxf.dimstyle)
+        A.set_style_annotative(style, True)                 # too late for these two
+        assert not any(A.is_annotative(d) for d in dims)
+        win.tools.selection = {d.dxf.handle for d in dims}
+        panel = win._properties_panel
+        panel.refresh()
+        tree = panel.tree
+        combo = None
+        for i in range(tree.topLevelItemCount()):
+            section = tree.topLevelItem(i)
+            for j in range(section.childCount()):
+                if section.child(j).text(0) == tr("Annotative"):
+                    combo = tree.itemWidget(section.child(j), 1)
+        assert combo is not None, "no Annotative row for dimensions"
+        combo.activated.emit(combo.findData(1))
+        assert all(A.is_annotative(d) for d in dims)
+        assert all([r.scale.name for r in A.representations(d)] == ["1:1"] for d in dims)
+        win._on_command_submitted("-OBJECTSCALE")
+        win._on_command_submitted("A")
+        win._on_command_submitted("2:1")
+        assert all({r.scale.name for r in A.representations(d)} == {"1:1", "2:1"}
+                   for d in dims)
+        win._cmd_undo()                                      # the 2:1
+        win._cmd_undo()                                      # the property
+        assert not any(A.is_annotative(d) for d in dims)
+        assert all(A.representations(d) == [] for d in dims)
+    finally:
+        win.document.dirty = False
+        win.close()

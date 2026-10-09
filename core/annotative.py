@@ -769,6 +769,79 @@ class SetAnnotationScaleCommand(Command):
         document.dirty = True
 
 
+class AnnotativePropertyCommand(Command):
+    """Properties > Annotative: Yes/No on texts and dimensions that exist
+    (#73). Rafael made his dimension and text styles annotative AFTER
+    dimensioning (review 6, 44:00-47:00): the dimensions already drawn kept
+    their plain size, and OBJECTSCALE answered "no annotative objects"
+    because, as in AutoCAD, a style does not change the objects already
+    made with it -- AutoCAD's way is this property.
+
+    Yes: the object gets a representation at the current annotation scale
+    (CANNOSCALE). A text keeps its model height (its paper height is that
+    over the scale); a dimension is drawn again at that scale (DIMSCALE =
+    the scale's factor), as one born in an annotative style is.
+    No: its scale representations go; it keeps the look it has.
+    """
+
+    name = "ANNOTATIVE"
+    needs_regen = True
+
+    def __init__(self, entities, on: bool) -> None:
+        self.entities = [e for e in entities if e.dxftype() in ("TEXT", "MTEXT", "DIMENSION")]
+        self.on = bool(on)
+        self._saved: list = []
+
+    def do(self, document) -> None:
+        from core.actions import rerender_dimension
+
+        doc = document.doc
+        scale = current_scale(doc) or default_scale(doc)
+        self._saved = []
+        for entity in self.entities:
+            if is_annotative(entity) == self.on:
+                continue
+            self._saved.append((entity, entity.get_xdata(ANNO_APPID)
+                                if entity.has_xdata(ANNO_APPID) else None,
+                                entity.get_xdata("ACAD") if entity.has_xdata("ACAD") else None,
+                                [r.scale.name for r in representations(entity)]))
+            if self.on:
+                if entity.dxftype() == "DIMENSION":
+                    override = entity.override()
+                    override["dimscale"] = scale.factor
+                    override.commit()
+                    rerender_dimension(document, entity)
+                    annotate_new_dimension(document, entity, scale)
+                elif supports_representation(entity):
+                    add_representation(entity, scale, default=True)
+                else:
+                    set_annotative(entity, True)
+            else:
+                remove_representations(entity)
+                entity.discard_xdata(ANNO_APPID)
+        document.dirty = True
+
+    def undo(self, document) -> None:
+        from core.actions import rerender_dimension
+
+        for entity, anno, acad, scales in reversed(self._saved):
+            remove_representations(entity)
+            entity.discard_xdata(ANNO_APPID)
+            if anno is not None:
+                entity.set_xdata(ANNO_APPID, list(anno))
+            for index, name in enumerate(scales):
+                found = find_scale(document.doc, name)
+                if found is not None and supports_representation(entity):
+                    add_representation(entity, found, default=index == 0)
+            if entity.dxftype() == "DIMENSION":
+                entity.discard_xdata("ACAD")
+                if acad is not None:
+                    entity.set_xdata("ACAD", list(acad))
+                rerender_dimension(document, entity)
+        self._saved = []
+        document.dirty = True
+
+
 class ObjectScaleCommand(Command):
     """OBJECTSCALE Add / Delete on a selection, one undo step."""
 
