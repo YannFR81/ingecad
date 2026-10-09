@@ -82,6 +82,12 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.6.6" date="2026-10-09">
+      <description>
+        <p>External references that survive Save as DWG, INSERT of another drawing, copy and paste between drawings with their blocks and styles, model plots on white paper and at 1:1, 1:2, 2:1, radius and diameter dimensions to the standard, annotative scales for existing objects, point styles, grips that obey ORTHO and object snaps, a polyline that snaps to its own points, TEXT height and angle by mouse, a selection filter by type, and saving without freezing the window. First Windows version.</p>
+        <p xml:lang="es">Referencias externas que sobreviven a Guardar como DWG, INSERT de otro dibujo, copiar y pegar entre dibujos con sus bloques y estilos, trazado del modelo en hoja blanca y a 1:1, 1:2, 2:1, cotas de radio y diámetro según norma, escalas anotativas para objetos existentes, estilos de punto, pinzamientos que respetan ORTO y las referencias, una polilínea que engancha sus propios puntos, altura y ángulo de TEXT con el mouse, un filtro de selección por tipo, y guardar sin congelar la ventana. Primera versión para Windows.</p>
+      </description>
+    </release>
     <release version="0.6.5" date="2026-09-28">
       <description>
         <p>External references (XATTACH, XREF), block attributes for title blocks, leaders (MLEADER, QLEADER), DIM and QDIM, PURGE, OVERKILL and WBLOCK, annotative text and dimensions, .ctb plot style tables, PUBLISH to one PDF, a Window plot area, DXF export, Python scripts with APPLOAD, a status bar you arrange yourself, and viewports that are fast to enter and switch.</p>

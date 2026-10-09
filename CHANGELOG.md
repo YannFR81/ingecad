@@ -1,5 +1,78 @@
 # Changelog
 
+## v0.6.6 — 2026-10-09
+
+The colleague's drawing, without scares: what stopped the people already
+working with IngeCAD -- Rafael, Arthur, Riccardo -- fixed before anything
+new is opened. And the first IngeCAD for **Windows**.
+
+### Windows
+- **IngeCAD for Windows** (#28): an installer (Start menu, "Open with" for
+  `.dwg` and `.dxf`, a clean uninstaller) and a portable zip, with the same
+  patched LibreDWG as on Linux. Not signed yet: Windows SmartScreen warns
+  the first time -- *More info* ▸ *Run anyway*.
+
+### Fixes that stopped work
+- **External references survive Save as DWG** (#66): the attached drawing
+  is still there after saving and reopening, with no "-2" suffix, and a
+  file chosen through the Flatpak portal keeps its real path. (The
+  LibreDWG half went upstream as LibreDWG #1431.)
+- **INSERT ▸ Browse…** inserts another drawing as a block (#70).
+- **Copy in one drawing, paste in another** brings its blocks, text and
+  dimension styles and layers along (#75).
+- **A model-space plot comes out on white paper** with dark lines, not on
+  the dark canvas (#62).
+- **A layer or dimension style emptied by ERASE can be deleted** (#64).
+- **Page Setup** shows its margins on their own sides of a picture of the
+  sheet (#61).
+- **Save as DWG no longer freezes the window for a second**: the
+  "Saving…" window keeps moving, keyboard and mouse are held until it
+  ends, and opening a drawing got faster too (worst pause 0.6 → 0.35 s).
+- **A polyline being drawn snaps to its own points**, as in AutoCAD: close
+  it on its start point by Endpoint, or snap the midpoint of a segment
+  already drawn.
+
+### Drawing to the standard
+- **Plot model space at 1:1, 1:2, 1:5, 2:1, 5:1…** in the drawing's own
+  unit (#68).
+- **Radius and diameter dimensions** with the text outside put the arrows
+  outside, pointing at the centre; a diameter with its text inside spans
+  the whole circle (#67).
+- **Annotative scaling the way it is used in AutoCAD** (#73): Properties ▸
+  *Annotative* for existing texts and dimensions, **Add / Delete Current
+  Scale** (also the + on the status bar), and the viewport follows.
+- **Point style** (#69): DDPTYPE, PDMODE and PDSIZE, sizes relative to the
+  screen kept at each regeneration, and the Node snap on the point itself.
+
+### Everyday editing
+- **Grips obey ORTHO, POLAR and Perpendicular** from where they were
+  grabbed (#60); Perpendicular lights with the cursor over the object.
+- **Several texts at once** in Properties: style and justification (#57,
+  #77).
+- **OFFSET** trims the loops a large offset makes and simplifies the shape
+  (#58).
+- **TEXT takes its height and angle from the mouse** as well as typed, with
+  a rubber band from the start point, and is typed inside a shaded box that
+  reads on the dark model and on the white sheet.
+- **A selection filter by object type** (FILTER on the status bar): select
+  only dimensions, only text…
+- IngeCAD **reopens at the size and place it was closed at** (#72).
+
+### Layouts, references, interface
+- The **External References** palette lists images and PDFs too, with
+  *Attach DWG / Image / PDF*.
+- A new drawing comes with **Layout1 and its viewport**; **PAGESETUP** works
+  on the Model tab; PLOT remembers its last setup; WBLOCK proposes DWG.
+- **A live language switch translates the whole window** (#74), not only
+  the menus. French joins as a community language pack.
+- **Help ▸ About IngeCAD** names the people whose work is in it.
+
+### Under the hood
+- A closed window is destroyed instead of hidden for the rest of the
+  session (it leaked memory; the test suite went from an hour to a minute).
+- The open, save and regeneration workers each have one owner, and the
+  garbage collector never runs on a worker thread.
+
 ## v0.6.5 — 2026-09-28
 
 The AutoCAD commands a colleague's drawing asks for: external references,

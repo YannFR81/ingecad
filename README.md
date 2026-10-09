@@ -31,7 +31,7 @@ and IngePresupuestos (construction budgeting).
   trim/offset/extend, survey points with elevations, and printing to scale.
   Not a feature-for-feature AutoCAD clone.
 
-## Status — v0.6.5
+## Status — v0.6.6
 
 What works today:
 
@@ -198,6 +198,14 @@ tables, elevation profiles — as the first discipline plug-in. See
 | Ctrl+Tab | Next drawing window |
 | Ctrl+N / O / S / Shift+S / P / Q | New, open, save, save as, plot, quit |
 
+
+## Install (Windows, 64-bit)
+
+From the [latest release](https://github.com/ingelibre/ingecad/releases/latest):
+`ingecad-setup-v*.exe` installs it (Start menu, "Open with" for `.dwg` and
+`.dxf`); `IngeCAD-*-windows-x64.zip` runs without installing. The installer
+is not signed yet, so the first time Windows SmartScreen says it protected
+your PC: *More info* ▸ *Run anyway*.
 
 ## Install (Linux, x86_64)
 
