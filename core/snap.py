@@ -624,9 +624,13 @@ class SnapEngine:
         cx, cy = cursor
         best: Optional[tuple[int, float, SnapHit]] = None
 
-        def offer(kind: str, x: float, y: float, circle=None) -> None:
+        def offer(kind: str, x: float, y: float, circle=None,
+                  reach: Optional[float] = None) -> None:
+            """``reach``: how far the cursor is from what it points at, when
+            that is not the snap point itself (PER: the object, not the
+            foot)."""
             nonlocal best
-            d = math.hypot(x - cx, y - cy)
+            d = math.hypot(x - cx, y - cy) if reach is None else reach
             if d > threshold:
                 return
             key = (PRIORITY[kind], d)
@@ -792,7 +796,13 @@ class SnapEngine:
             for a in near_idx:
                 p = _project_on_segment(segs[a], fx, fy)
                 if p is not None:
-                    offer("PER", p[0], p[1])
+                    # AutoCAD lights PER when the aperture is over the
+                    # OBJECT, and the marker goes to the foot wherever it
+                    # falls on it: the foot is often far from the cursor
+                    # (a grip drag on a big screen missed it, the CI's)
+                    over = _closest_on_segment(segs[a], cx, cy)
+                    offer("PER", p[0], p[1],
+                          reach=math.hypot(over[0] - cx, over[1] - cy))
         if "NEA" in kinds:
             for a in near_idx:
                 p = _closest_on_segment(segs[a], cx, cy)
