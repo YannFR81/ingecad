@@ -28,7 +28,11 @@ ls tests/test_*.py | split -n "r/$N" - "$WORK/part_"
 # frames, and the CI's segfaults stopped at processEvents). Signals other
 # than the fatal ones pass straight through.
 RUN=()
+VERBOSE=-q
 if [ "${TESTS_GDB:-0}" = 1 ] && command -v gdb >/dev/null; then
+    # gdb stops the process before faulthandler prints the Python stack:
+    # one line per test names the one that was running
+    VERBOSE=-v
     RUN=(gdb -q -batch -return-child-result
          -ex "set pagination off"
          -ex "handle all nostop noprint pass"
@@ -45,7 +49,7 @@ for part in "$WORK"/part_*; do
     if command -v xvfb-run >/dev/null; then
         # -n: a server number per part; -a would race between parallel starts
         xvfb-run -n $((90 + i)) -s "-screen 0 1600x1000x24" \
-            "${RUN[@]}" "$PY" -m pytest -q -p no:cacheprovider $(cat "$part") \
+            "${RUN[@]}" "$PY" -m pytest "$VERBOSE" -p no:cacheprovider $(cat "$part") \
             > "$part.log" 2>&1 &
     else
         # no Xvfb (a developer's desktop): tests/conftest.py picks offscreen
