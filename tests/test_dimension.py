@@ -937,3 +937,19 @@ def test_vertical_chains_align_on_x():
     tool.on_point((0.0, 8.0)); tool.on_point((0.0, 20.0))
     tool.on_point((-6.3, 14.0))
     assert h.msp.query("DIMENSION")[-1].dxf.defpoint.x == pytest.approx(-6.0)
+
+
+def test_a_diameter_with_its_text_inside_spans_the_circle():
+    # #67 (Rafael): with the text placed inside the circle the dimension
+    # drew ONE arrowhead and a line from the text to the circle -- half a
+    # diameter. It must cross the circle, both arrowheads, text on it.
+    doc = Document.new()
+    History(doc).execute(actions.dim_diameter((60, 0), 19, (64, -6)))
+    dim = next(e for e in doc.modelspace() if e.dxftype() == "DIMENSION")
+    block = doc.doc.blocks.get(dim.dxf.geometry)
+    arrows = [e for e in block if e.dxftype() == "INSERT"]
+    lines = [e for e in block if e.dxftype() == "LINE"]
+    assert len(arrows) == 2
+    assert len(lines) == 1
+    span = (lines[0].dxf.end - lines[0].dxf.start).magnitude
+    assert span == pytest.approx(38 - 2 * 2.5)        # base to base of the arrowheads

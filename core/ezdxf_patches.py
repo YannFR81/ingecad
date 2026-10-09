@@ -377,9 +377,22 @@ def _patch_radial_dimension_layout() -> None:
             self.add_diameter_dim_line(self.point_on_circle, self.point_on_circle2)
             ext_line(self, near, user)
 
+    def diameter_across_with_text_inside(self) -> bool:
+        """Text placed inside the circle, on the dimension line: ezdxf takes
+        it for text moved off the line and draws a single leader from the
+        text to the circle -- one arrowhead, no diameter (#67). AutoCAD and
+        the norm draw the whole diameter, both arrowheads, the text on it."""
+        m = self.measurement
+        return (not m.text_is_outside and not m.text_inside_horizontal
+                and self.dim_style.get("dimtmove", 0) != 2)
+
     def render_user_location_diameter(self) -> None:
         if iso_case(self):
             diameter_iso(self, user=True)
+        elif diameter_across_with_text_inside(self):
+            near = self._add_arrow_1(rotate=False)
+            far = self._add_arrow_2(rotate=True)
+            self.add_diameter_dim_line(near, far)
         else:
             diameter_user(self)
 
