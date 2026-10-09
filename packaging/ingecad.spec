@@ -61,6 +61,15 @@ hiddenimports = [
 from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports += collect_submodules("core")
+# ...and by the files themselves: collect_submodules IMPORTS each module to
+# find it, and on the Windows runner core.georef did not make the list
+# (the Windows build's --check: "plugin terreno: No module named
+# core.georef"). The file list cannot miss one.
+for module in sorted((ROOT / "core").rglob("*.py")):
+    parts = module.relative_to(ROOT).with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    hiddenimports.append(".".join(parts))
 hiddenimports += ["xml.etree.ElementTree", "zipfile", "urllib.request", "urllib.error", "secrets"]
 
 # Qt ships far more than a 2D CAD viewport needs. Everything here is verified
