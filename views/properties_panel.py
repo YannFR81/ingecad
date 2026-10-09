@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import actions, layers as layer_ops
+from core import actions, layers as layer_ops, text_justify
 from core.i18n import tr
 
 BYLAYER_LW = -1          # AutoCAD's ByLayer lineweight sentinel
@@ -287,7 +287,11 @@ class PropertiesPanel(QWidget):
     def _schema(self, entities: list):
         types = {e.dxftype() for e in entities}
         sections = [(tr("General"), self._general_rows(types))]
-        if len(types) == 1 and len(entities) == 1:
+        # One type, one object or many: AutoCAD shows the type's rows for
+        # the whole selection (*VARIES* where they differ) and an edit lands
+        # on every object -- #57: five texts in different styles could not
+        # be given one style, the Text section only came for a lone text.
+        if len(types) == 1:
             builder = _TYPE_ROWS.get(next(iter(types)))
             if builder is not None:
                 sections.append(builder(self, entities[0]))
@@ -432,6 +436,13 @@ def _lwpolyline_rows(panel, e):
 
 
 def _text_rows(panel, e):
+    def set_justify(v):
+        # #77: the letters stay put; only the alignment point moves
+        def mutate():
+            for ent in panel._active():
+                text_justify.set_justification(ent, v)
+        panel._in_place(mutate)
+
     def set_text(v):
         def mutate():
             for ent in panel._active():
@@ -441,6 +452,8 @@ def _text_rows(panel, e):
         Row(tr("Contents"), "str", lambda e: e.dxf.text, set_text),
         Row(tr("Style"), "combo", lambda e: e.dxf.get("style", "Standard"),
             lambda v: panel._set_prop("style", v), _style_items(panel)),
+        Row(tr("Justify"), "combo", text_justify.justification, set_justify,
+            [(tr(label), name) for label, name in text_justify.JUSTIFICATIONS]),
         Row(tr("Height"), "num", lambda e: e.dxf.height,
             lambda v: panel._set_prop("height", v)),
         Row(tr("Rotation"), "num", lambda e: e.dxf.get("rotation", 0.0),
@@ -460,6 +473,9 @@ def _mtext_rows(panel, e):
             lambda e: e.text.replace("\n", " ")[:40]),
         Row(tr("Style"), "combo", lambda e: e.dxf.get("style", "Standard"),
             lambda v: panel._set_prop("style", v), _style_items(panel)),
+        Row(tr("Justify"), "combo", lambda e: e.dxf.get("attachment_point", 1),
+            lambda v: panel._set_prop("attachment_point", v),
+            [(tr(label), n) for label, n in text_justify.ATTACHMENTS]),
         Row(tr("Text height"), "num", lambda e: e.dxf.char_height,
             lambda v: panel._set_prop("char_height", v)),
         Row(tr("Rotation"), "num", lambda e: e.dxf.get("rotation", 0.0),

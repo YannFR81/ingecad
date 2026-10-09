@@ -1851,5 +1851,17 @@
   "Set Size in Absolute Units": "Definir tamaño en unidades absolutas",
   "Enter new value for PDMODE <{current}>:": "Indique nuevo valor para PDMODE <{current}>:",
   "Enter new value for PDSIZE <{current}>:": "Indique nuevo valor para PDSIZE <{current}>:",
-  "Invalid point display mode.": "Modo de visualización de punto no válido."
+  "Invalid point display mode.": "Modo de visualización de punto no válido.",
+  "Left": "Izquierda",
+  "Right": "Derecha",
+  "Middle": "Medio",
+  "Top left": "Superior izquierda",
+  "Top center": "Superior centro",
+  "Top right": "Superior derecha",
+  "Middle left": "Medio izquierda",
+  "Middle center": "Medio centro",
+  "Middle right": "Medio derecha",
+  "Bottom left": "Inferior izquierda",
+  "Bottom center": "Inferior centro",
+  "Bottom right": "Inferior derecha"
 }
