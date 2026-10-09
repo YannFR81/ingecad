@@ -156,6 +156,13 @@ def _open(qapp, win, path):
             and time.monotonic() - t0 < 30:
         qapp.processEvents()
     qapp.processEvents()
+    # the "Loading file" window (#50) may have taken the activation
+    from PySide6.QtTest import QTest
+
+    win.activateWindow()
+    QTest.qWaitForWindowActive(win, 5000)
+    win.viewport.setFocus()
+    qapp.processEvents()
 
 
 def test_copy_in_one_drawing_and_paste_in_another_keeps_what_it_needs(qapp, tmp_path):
@@ -174,16 +181,22 @@ def test_copy_in_one_drawing_and_paste_in_another_keeps_what_it_needs(qapp, tmp_
     win = MainWindow()
     win.maybe_save_changes = lambda: True
     win.show()
+    # Xvfb has no window manager: a keystroke to an inactive window is lost
+    win.activateWindow()
+    QTest.qWaitForWindowActive(win, 5000)
     try:
         _open(qapp, win, _colleague(tmp_path))
         win.tools.select_all()
         win.viewport.setFocus()
         QTest.keySequence(win.viewport, QKeySequence("Ctrl+C"))
         qapp.processEvents()
+        assert win.tools.clipboard_originals(), "Ctrl+C did not reach the canvas"
         _open(qapp, win, tmp_path / "mio.dxf")
         win.viewport.setFocus()
         QTest.keySequence(win.viewport, QKeySequence("Ctrl+V"))
         qapp.processEvents()
+        assert win.tools.tool is not None and win.tools.tool.name == "PASTECLIP", \
+            "Ctrl+V did not reach the canvas"
         win.tools.on_text("100,0")
         qapp.processEvents()
         out = tmp_path / "pegado.dxf"
