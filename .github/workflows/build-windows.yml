@@ -16,6 +16,11 @@ on:
     tags: ["v*"]
     branches: [windows]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version of a test build (e.g. 0.6.5.1); empty = core/version.py"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -96,6 +101,15 @@ jobs:
             tests/test_windows_ready.py tests/test_dwg_bridge.py \
             tests/test_xrefs.py tests/test_units.py tests/test_layers.py \
             tests/test_editing.py tests/test_point_style.py
+
+      # A test build for a real Windows PC carries its own number, in the
+      # installer AND in the app's About, so nobody mistakes it for a release.
+      - name: Test-build version
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+        shell: bash
+        run: |
+          sed -i 's/^__version__ = .*/__version__ = "${{ inputs.version }}"/' core/version.py
+          cat core/version.py | grep __version__
 
       - name: Freeze with PyInstaller
         shell: bash
