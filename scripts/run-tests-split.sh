@@ -23,6 +23,21 @@ cd "$ROOT"
 
 ls tests/test_*.py | split -n "r/$N" - "$WORK/part_"
 
+# TESTS_GDB=1: each part runs under gdb, which prints every thread's
+# NATIVE stack if the interpreter dies (faulthandler only shows the Python
+# frames, and the CI's segfaults stopped at processEvents). Signals other
+# than the fatal ones pass straight through.
+RUN=()
+if [ "${TESTS_GDB:-0}" = 1 ] && command -v gdb >/dev/null; then
+    RUN=(gdb -q -batch -return-child-result
+         -ex "set pagination off"
+         -ex "handle all nostop noprint pass"
+         -ex "handle SIGSEGV stop print nopass"
+         -ex "handle SIGBUS stop print nopass"
+         -ex "handle SIGABRT stop print nopass"
+         -ex run -ex "thread apply all bt 40" --args)
+fi
+
 pids=()
 i=0
 for part in "$WORK"/part_*; do
@@ -30,7 +45,7 @@ for part in "$WORK"/part_*; do
     if command -v xvfb-run >/dev/null; then
         # -n: a server number per part; -a would race between parallel starts
         xvfb-run -n $((90 + i)) -s "-screen 0 1600x1000x24" \
-            "$PY" -m pytest -q -p no:cacheprovider $(cat "$part") \
+            "${RUN[@]}" "$PY" -m pytest -q -p no:cacheprovider $(cat "$part") \
             > "$part.log" 2>&1 &
     else
         # no Xvfb (a developer's desktop): tests/conftest.py picks offscreen
