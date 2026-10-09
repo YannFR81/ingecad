@@ -279,6 +279,7 @@ def main() -> int:
     from views.main_window import MainWindow
 
     window = MainWindow()
+    window.restore_window_geometry()    # as it was last closed (#72)
     # Show before opening, not after. A double-clicked drawing can take
     # seconds, and the window must already be on screen for that wait to be
     # visible at all. It also keeps the status bar honest: QStatusBar only
@@ -309,6 +310,12 @@ def main() -> int:
         # double-clicked in the file manager never sees this window, and the
         # user can retire it with its own checkbox.
         opened = _startup_choice(window)
+    import shiboken6
+
+    if not shiboken6.isValid(window):
+        # closed during the start-up dialogs: a closed window is destroyed
+        # (WA_DeleteOnClose), and there is nothing left to run
+        return 0
     if not opened:
         window.new_document()
     _offer_appimage_integration(window)

@@ -216,6 +216,10 @@ class _SaveWorker(QThread):
                 self.error = exc
 
 
+#: QSettings key of the main window's geometry (saveGeometry()).
+SETTING_WINDOW_GEOMETRY = "ui/window_geometry"
+
+
 class MainWindow(QMainWindow):
     # A live viewport regen must fit a frame-ish budget or pan blocks the UI.
     _VP_LIVE_BUDGET_MS = 33.0
@@ -5578,7 +5582,20 @@ class MainWindow(QMainWindow):
         # A normal exit leaves nothing behind: what the Drawing Recovery
         # Manager lists is, by definition, what a crash left.
         self._autosave_discard()
+        if self.isVisible():                 # a never-shown window has none
+            QSettings().setValue(SETTING_WINDOW_GEOMETRY, self.saveGeometry())
         event.accept()
+
+    def restore_window_geometry(self) -> bool:
+        """The size, place and maximized state the window was closed with
+        (#72: it always came back at 1280 x 800). Called by the application
+        at start-up, before show(); a window made in a test keeps its
+        default. On Wayland the compositor places the window, so only the
+        size and the maximized state come back there."""
+        geometry = QSettings().value(SETTING_WINDOW_GEOMETRY)
+        if not geometry:
+            return False
+        return bool(self.restoreGeometry(geometry))
 
     def _drain_workers(self) -> None:
         """Join every background thread before the window dies.
