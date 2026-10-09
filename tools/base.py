@@ -103,6 +103,13 @@ class Tool:
 
     def on_point(self, point: Point) -> None: ...
 
+    def drawn_segments(self) -> list:
+        """Segments this command has drawn but not yet committed, as
+        (x1, y1, x2, y2): the object snaps find them as they find the
+        drawing's (AutoCAD snaps to a polyline while it is being drawn).
+        Never the rubber band to the cursor -- only what is decided."""
+        return []
+
     def on_option(self, text: str) -> bool:
         """A non-coordinate token from the prompt. True if consumed."""
         return False

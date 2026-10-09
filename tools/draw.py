@@ -1271,6 +1271,18 @@ class PlineTool(Tool):
         type(self).current_width = self._ew
         self.last_point = point
 
+    def drawn_segments(self) -> list:
+        # A straight segment snaps whole (END, MID, NEA, INT, PER); an arc
+        # segment offers its two ends only, as zero-length segments --
+        # its chord is not on the arc.
+        out = []
+        for (a, b), seg in zip(zip(self._verts, self._verts[1:]), self._segs):
+            if seg["bulge"] == 0.0:
+                out.append((a[0], a[1], b[0], b[1]))
+            else:
+                out.extend([(a[0], a[1], a[0], a[1]), (b[0], b[1], b[0], b[1])])
+        return out
+
     def _bulge_from_geom(self, geom, start: Point, end: Point) -> float:
         # entity angles are stored CCW, so the entity sweep equals the user's
         # travel magnitude; the travel direction gives the bulge its sign

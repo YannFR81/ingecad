@@ -614,10 +614,14 @@ class SnapEngine:
         threshold: float,
         kinds: frozenset[str] = ALL_KINDS,
         from_point: Optional[tuple[float, float]] = None,
+        drawn: Optional[list] = None,
     ) -> Optional[SnapHit]:
         """Best snap within ``threshold`` world units of the cursor.
 
         ``from_point`` anchors PER (perpendicular from the previous point).
+        ``drawn``: segments (x1, y1, x2, y2) the running command has drawn
+        but not committed yet (Tool.drawn_segments), snapped like the
+        drawing's own.
         """
         if self._dirty:
             self._build()
@@ -649,6 +653,20 @@ class SnapEngine:
                     & (b[:, 1] - threshold <= cy) & (b[:, 3] + threshold >= cy))
             segs = self._segs[near]
             seg_oids = self._seg_oidx[near]
+        if drawn:
+            extra = np.asarray(drawn, dtype=float).reshape(-1, 4)
+            lo_x = np.minimum(extra[:, 0], extra[:, 2])
+            hi_x = np.maximum(extra[:, 0], extra[:, 2])
+            lo_y = np.minimum(extra[:, 1], extra[:, 3])
+            hi_y = np.maximum(extra[:, 1], extra[:, 3])
+            near = ((lo_x - threshold <= cx) & (hi_x + threshold >= cx)
+                    & (lo_y - threshold <= cy) & (hi_y + threshold >= cy))
+            if near.any():
+                # each its own object id: two segments of the shape being
+                # drawn do cross, unlike the chords of one curve
+                ids = -1 - np.nonzero(near)[0].astype(np.int32)
+                segs = np.vstack([segs, extra[near]]) if len(segs) else extra[near]
+                seg_oids = np.concatenate([seg_oids, ids]) if len(seg_oids) else ids
         # Curve chords ride along for NEA/PER/INT, and ONLY those: an END on
         # every chord vertex would be a marker on nothing.
         curves = np.empty((0, 4))

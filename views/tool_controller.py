@@ -1832,11 +1832,8 @@ class ToolController(QObject):
         kinds = self.snap_kinds()
         self.track_hint = None
         if needs_snap and self.snap_engine is not None and kinds:
-            self.snap_hit = self.snap_engine.find(
-                (wx, wy), threshold_world,
-                kinds=kinds,
-                from_point=self.anchor_point(),
-            )
+            self.snap_hit = self._find_snap(
+                (wx, wy), threshold_world, kinds, self.anchor_point())
             through = self._snap_through_viewport((wx, wy), threshold_world)
             if through is not None and (
                     self.snap_hit is None
@@ -2083,9 +2080,16 @@ class ToolController(QObject):
             return
         wx, wy = self._cursor
         kinds = self.snap_kinds()
-        self.snap_hit = (self.snap_engine.find(
-            (wx, wy), self.px_to_space(SNAP_PX), kinds=kinds,
-            from_point=self.tool.last_point) if kinds else None)
+        self.snap_hit = (self._find_snap(
+            (wx, wy), self.px_to_space(SNAP_PX), kinds,
+            self.tool.last_point) if kinds else None)
+
+    def _find_snap(self, at, threshold, kinds, from_point):
+        """The object snap at ``at``: the drawing's, and what the running
+        command has drawn but not committed yet (a PLINE's own segments)."""
+        drawn = self.tool.drawn_segments() if self.tool is not None else None
+        return self.snap_engine.find(at, threshold, kinds=kinds,
+                                     from_point=from_point, drawn=drawn)
 
     def _tracked(self, wx: float, wy: float, anchor, ortho: bool):
         """Where the alignment paths put the cursor: on the nearest path
