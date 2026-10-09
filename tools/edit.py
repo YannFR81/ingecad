@@ -503,19 +503,25 @@ class OffsetTool(Tool):
         layer = attribs.pop("layer", None)
         kind = entity.dxftype()
         if kind in ("LWPOLYLINE", "POLYLINE"):
-            result = polyoffset.offset_polyline(
+            pieces = polyoffset.offset_polylines(
                 _polyline_rows(entity), _polyline_closed(entity),
                 distance, side)
-            if result is None:
+            if not pieces:
                 self.ctx.echo(tr("The offset does not fit that polyline."))
                 return
-            rows, closed = result
-            command = actions.AddEntityCommand(
+            # a shape the offset splits into islands gives one polyline per
+            # island, as AutoCAD's OFFSET does (#58)
+            adds = [actions.AddEntityCommand(
                 "OFFSET",
                 lambda msp, r=rows, c=closed, a=attribs: _add_polyline(
                     msp, r, c, a),
-                layer=layer)
-            self.ctx.execute(command)
+                layer=layer) for rows, closed in pieces]
+            if len(adds) == 1:
+                self.ctx.execute(adds[0])
+            else:
+                from core.commands import CompositeCommand
+
+                self.ctx.execute(CompositeCommand("OFFSET", adds))
             self._done_any = True
             if type(self).erase_source:
                 self.ctx.execute(actions.EraseCommand([entity]))
@@ -593,18 +599,9 @@ def _distance_to_polyline(entity, point) -> float:
     """Shortest distance from a point to the polyline's own geometry."""
     elements = polyoffset.elements_of(
         _polyline_rows(entity), _polyline_closed(entity))
-    best = None
-    for element in elements:
-        if element[0] == "L":
-            _k, p0, p1 = element
-            _t, closest = polyoffset._closest_on_segment(p0, p1, point)
-            distance = math.dist(point, closest)
-        else:
-            _k, center, radius, _a0, _a1, _ccw = element
-            distance = abs(math.dist(point, center) - radius)
-        if best is None or distance < best:
-            best = distance
-    return best or 0.0
+    if not elements:
+        return 0.0
+    return min(polyoffset.distance_to(point, e) for e in elements)
 
 
 def _add_polyline(msp, rows, closed: bool, attribs: dict):
