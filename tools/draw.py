@@ -996,6 +996,14 @@ class TextTool(Tool):
             self._pos = point
             self.last_point = point
             self._after_point()
+            return
+        if self._asking_by_point():
+            dx, dy = point[0] - self._pos[0], point[1] - self._pos[1]
+            if self._height is None:
+                if math.hypot(dx, dy) > 1e-9:
+                    self._take_height(math.hypot(dx, dy))
+            else:
+                self._take_rotation(math.degrees(math.atan2(dy, dx)))
 
     def on_option(self, text: str) -> bool:
         # The resolver first: it turns the localized keyword, or
@@ -1057,22 +1065,42 @@ class TextTool(Tool):
             value = _parse_number(text) if text else type(self).default_height
             if value is None or value <= 0:
                 return False
-            self._height = value
-            type(self).default_height = value
-            if self._align == "FIT":
-                self._begin_typing()   # rotation comes from the two points
-            else:
-                self._rotation_prompt()
+            self._take_height(value)
             return True
         if self._rotation is None:
             value = _parse_number(text) if text else type(self).last_rotation
             if value is None:
                 return False
-            self._rotation = value
-            type(self).last_rotation = value
-            self._begin_typing()
+            self._take_rotation(value)
             return True
         return False
+
+    # Typed or picked, a height and an angle land here. A pick measures
+    # from the start point: its distance is the height, its direction the
+    # angle (AutoCAD's "Specify height" / "Specify rotation angle").
+    def _take_height(self, value: float) -> None:
+        self._height = value
+        type(self).default_height = value
+        if self._align == "FIT":
+            self._begin_typing()   # rotation comes from the two points
+        else:
+            self._rotation_prompt()
+
+    def _take_rotation(self, value: float) -> None:
+        self._rotation = value
+        type(self).last_rotation = value
+        self._begin_typing()
+
+    def _asking_by_point(self) -> bool:
+        """At the height or the rotation prompt, where a pick answers."""
+        return (not self.typing and self._pos is not None and self._await is None
+                and (self._height is None or self._rotation is None))
+
+    def preview_segments(self, cursor: Point):
+        # the rubber band from the start point, as AutoCAD draws it
+        if self._asking_by_point():
+            return [(tuple(self._pos), tuple(cursor))]
+        return []
 
     def _set_align(self, align: str) -> None:
         self._align = align

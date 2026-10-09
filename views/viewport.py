@@ -1581,11 +1581,19 @@ class Viewport(QOpenGLWidget):
         font = QFont()
         font.setPixelSize(int(px))
         p.setFont(font)
-        p.setPen(QPen(QColor(230, 230, 230)))
         text = buffer if buffer else ""
         fm = p.fontMetrics()
-        p.drawText(QPointF(0, 0), text)            # baseline at the pick point
         caret_x = fm.horizontalAdvance(text)
+        # AutoCAD types TEXT inside a shaded box: it says "this is being
+        # edited" and reads on the dark model and on the white sheet alike
+        # (a fixed light grey text was nearly invisible on the paper).
+        light = self._light_background()
+        pad = px * 0.2
+        p.fillRect(QRectF(-pad, -fm.ascent() - pad,
+                          caret_x + 2 + 2 * pad, fm.ascent() + fm.descent() + 2 * pad),
+                   QColor(120, 120, 120, 70 if light else 90))
+        p.setPen(QPen(QColor(20, 20, 20) if light else QColor(230, 230, 230)))
+        p.drawText(QPointF(0, 0), text)            # baseline at the pick point
         p.setPen(QPen(QColor(255, 200, 0), 1))     # blinking-less caret bar
         p.drawLine(QPointF(caret_x + 1, -px * 0.75), QPointF(caret_x + 1, px * 0.15))
         p.restore()
