@@ -13,7 +13,7 @@ artifacts", and the 1 that dynapi did take landed in `BLOCK.xref_pname`,
 which no DWG writes. So every xref saved through `dxf2dwg` came back as an
 empty plain block: an attached title block vanished after save and reopen
 (Rafael, review 6). Now the 70 bits go to the owning BLOCK_HEADER and the
-path is copied to it when the BLOCK is linked. ODA reads the result as an
+path is copied to it when the BLOCK is linked (upstream PR #1431). ODA reads the result as an
 xref (70 = 4, 1 = `./FormatoA4.dxf`; before: 0 and empty). `make check`
 270/0; `dwg_fuzz.py run --count 500` identical seed by seed to the build
 without it.
