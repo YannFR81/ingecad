@@ -182,6 +182,14 @@ def every_command_name() -> dict[str, str]:
 _every_command_name: dict[str, str] = {}
 
 
+def tr_context(key: str) -> str:
+    """Translate ``"context|text"``: one English word that two languages
+    split, like "Dimension" -- the menu is "Acotar", the object "Cota".
+    Untranslated, it reads as the text after the bar."""
+    found = _catalog.get(key)
+    return found if found is not None else key.split("|", 1)[-1]
+
+
 def tr(text: str, /, **kwargs) -> str:
     """Translate ``text`` into the active language; interpolate ``kwargs``.
 

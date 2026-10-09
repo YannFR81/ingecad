@@ -354,6 +354,10 @@ class ToolController(QObject):
         # Shift+right-click menu): the snaps for the NEXT point only, running
         # modes or not. None = no override; an empty set = no snap at all.
         self.osnap_override: Optional[frozenset] = None
+        # The selection filter by type (core.pickfilter): the type names a
+        # pick may add, or None when it is off. Kept across drawings, like
+        # the status-bar toggles.
+        self.pick_filter: Optional[frozenset] = None
         # A point modifier in progress (FROM, M2P): its own points are
         # collected here and ONE point reaches the tool at the end.
         self._modifier: Optional[dict] = None
@@ -780,11 +784,11 @@ class ToolController(QObject):
             if layer is not None and (layer.is_off() or layer.is_frozen() or layer.is_locked()):
                 continue
             handles.add(handle)
-        self.selection = handles
+        self.selection = self._filtered(handles)
         self._highlight_cache = None
         self._grips_cache = None
         self.changed.emit()
-        return len(handles)
+        return len(self.selection)
 
     def clear_selection(self) -> None:
         self.reset_pick_cycle()
@@ -2686,7 +2690,7 @@ class ToolController(QObject):
             if shift:
                 self.selection -= self._with_groups(hits)
             else:
-                self.selection |= self._with_groups(hits)
+                self.selection |= self._filtered(self._with_groups(hits))
             self._echo_count()
             return
         previous = self._cycle
@@ -2709,8 +2713,31 @@ class ToolController(QObject):
                 # cycled: swap the previous candidate out instead of adding
                 # the second one -- "I meant the other object", not "both".
                 self.selection -= self._with_groups([previous[1][previous[2]]])
-            self.selection |= self._with_groups([handle])
+            self.selection |= self._filtered(self._with_groups([handle]))
         self._echo_count()
+
+    def _filtered(self, handles) -> set:
+        """What the selection filter lets in; says how many it kept out,
+        so a filter left on never looks like a pick that failed."""
+        if self.pick_filter is None:
+            return set(handles)
+        from core import pickfilter
+
+        handles = set(handles)
+        document = self.window.document
+        entity_of = (document.doc.entitydb.get if document is not None
+                     else (lambda _h: None))
+        kept = pickfilter.keep(handles, entity_of, self.pick_filter)
+        if len(kept) < len(handles):
+            self.window.command_line.echo(
+                tr("{n} object(s) left out by the selection filter.",
+                   n=len(handles) - len(kept)))
+        return kept
+
+    def set_pick_filter(self, allowed) -> None:
+        """Switch the filter: a set of type names, or None for off."""
+        self.pick_filter = None if allowed is None else frozenset(allowed)
+        self.changed.emit()
 
     def _with_groups(self, handles) -> set:
         """Picking one member of a selectable group takes the whole group —

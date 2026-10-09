@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import actions, layers as layer_ops, text_justify
+from core import actions, layers as layer_ops, pickfilter, text_justify
 from core.i18n import tr
 
 BYLAYER_LW = -1          # AutoCAD's ByLayer lineweight sentinel
@@ -135,7 +135,7 @@ class PropertiesPanel(QWidget):
         from collections import Counter
         counts = Counter(e.dxftype() for e in self._all)
         for t, c in sorted(counts.items()):
-            label = _TYPE_LABEL.get(t, t.title())
+            label = pickfilter.display(pickfilter.type_label(t))
             self.filter_cb.addItem(f"{label} ({c})" if c > 1 else label, t)
         idx = self.filter_cb.findData(self._filter)
         self.filter_cb.setCurrentIndex(max(0, idx))
@@ -645,12 +645,6 @@ def _leader_rows(panel, e):
     ])
 
 
-_TYPE_LABEL = {
-    "LINE": "Line", "CIRCLE": "Circle", "ARC": "Arc", "ELLIPSE": "Ellipse",
-    "LWPOLYLINE": "Polyline", "POLYLINE": "Polyline", "POINT": "Point",
-    "TEXT": "Text", "MTEXT": "MText", "INSERT": "Block Reference",
-    "HATCH": "Hatch", "DIMENSION": "Dimension",
-}
 
 def _image_rows(panel, e):
     from ezdxf.entities.image import Image as _Image

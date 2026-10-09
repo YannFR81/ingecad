@@ -1983,6 +1983,7 @@ class MainWindow(QMainWindow):
             if fkey:
                 QShortcut(QKeySequence(fkey), self,
                           lambda k=key: self._toggle_mode(k))
+        self._build_pick_filter(style)
         self._build_annotation_controls(style)
         self._build_statusbar_customization(style)
         self._load_osnap_modes()
@@ -2143,6 +2144,64 @@ class MainWindow(QMainWindow):
 
         QSettings().setValue(self.SETTING_ANNOAUTOSCALE, int(value))
         self._refresh_annotation_controls()
+
+    def _build_pick_filter(self, style: str) -> None:
+        """The selection filter by type (core.pickfilter): lit while it
+        keeps some types out of every pick."""
+        from PySide6.QtWidgets import QToolButton
+
+        self._pick_filter_btn = QToolButton(self)
+        self._pick_filter_btn.setText(tr("FILTER"))
+        self._pick_filter_btn.setCheckable(True)
+        self._pick_filter_btn.setStyleSheet(style)
+        self._pick_filter_btn.setFocusPolicy(Qt.NoFocus)
+        self._pick_filter_btn.clicked.connect(
+            lambda _=False: self._show_pick_filter())
+        self.statusBar().addPermanentWidget(self._pick_filter_btn)
+        self._refresh_pick_filter_button()
+
+    def _show_pick_filter(self) -> None:
+        from views.pick_filter_popup import PickFilterPopup
+
+        self._refresh_pick_filter_button()    # a click must not toggle it
+        popup = PickFilterPopup(self)
+        popup.setAttribute(Qt.WA_DeleteOnClose)
+        button = self._pick_filter_btn
+        popup.adjustSize()
+        corner = button.mapToGlobal(button.rect().topLeft())
+        popup.move(corner.x(), corner.y() - popup.height())
+        popup.show()
+
+    def set_pick_filter(self, allowed) -> None:
+        """Only these object types (core.pickfilter names) may be picked;
+        None switches the filter off."""
+        from core import pickfilter
+
+        self.tools.set_pick_filter(allowed)
+        self._refresh_pick_filter_button()
+        if allowed is None:
+            self.command_line.echo(tr("Selection filter off."))
+        else:
+            self.command_line.echo(tr(
+                "Selection filter: only {types}.",
+                types=", ".join(pickfilter.display(t) for t in sorted(allowed))
+                or tr("nothing")))
+
+    def _refresh_pick_filter_button(self) -> None:
+        button = getattr(self, "_pick_filter_btn", None)
+        if button is None:
+            return
+        from core import pickfilter
+
+        allowed = self.tools.pick_filter
+        button.setChecked(allowed is not None)
+        if allowed is None:
+            button.setToolTip(tr("Selection filter by object type: off"))
+        else:
+            button.setToolTip(tr(
+                "Selection filter by object type: only {types}",
+                types=", ".join(pickfilter.display(t) for t in sorted(allowed))
+                or tr("nothing")))
 
     def _build_annotation_controls(self, style: str) -> None:
         """AutoCAD's status-bar annotation scale ("Annotation Scale of the
@@ -2407,9 +2466,11 @@ class MainWindow(QMainWindow):
             if key == "osnap":
                 widgets.append(self._osnap_arrow)
             items.append((key, tr(tip) + (f" ({fkey})" if fkey else ""), widgets))
-        items += [("annovis", tr("Annotation visibility"), [self._anno_visible_btn]),
+        items += [("pickfilter", tr("Selection filter"), [self._pick_filter_btn]),
+                  ("annovis", tr("Annotation visibility"), [self._anno_visible_btn]),
                   ("annoauto", tr("Annotation autoscale"), [self._anno_auto_btn]),
-                  ("annoscale", tr("Annotation scale"), [self._anno_scale_combo])]
+                  ("annoscale", tr("Annotation scale"),
+                   [self._anno_scale_combo, self._anno_add_btn])]
         return items
 
     def _statusbar_hidden(self) -> set:

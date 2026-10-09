@@ -167,3 +167,73 @@ def test_pagesetup_on_the_model_tab_feeds_plot(qapp, monkeypatch):
     finally:
         win.document.dirty = False
         win.close()
+
+
+# -- 1. Selection filter by type ----------------------------------------------------
+
+def _drawing_with_dimensions(win):
+    win.tools._execute(actions.add_line((0, 0), (100, 0)))
+    win.tools._execute(actions.add_circle((50, 30), 10))
+    win.tools._execute(actions.dim_linear((0, 0), (100, 0), (50, -15)))
+    win.tools._execute(actions.dim_linear((0, 0), (0, 40), (-15, 20)))
+    msp = win.document.doc.modelspace()
+    return {e.dxf.handle for e in msp.query("DIMENSION")}
+
+
+def test_a_window_over_everything_takes_only_the_dimensions(qapp):
+    win = _window(qapp)
+    try:
+        dims = _drawing_with_dimensions(win)
+        said = []
+        win.command_line.echo = lambda text, *a, **k: said.append(text)
+        win.set_pick_filter({"Dimension"})
+        assert win._pick_filter_btn.isChecked(), "the button does not show it is on"
+        win.tools.osnap_on = False
+        win.tools.on_click(-50.0, -50.0)            # window, left to right
+        win.tools.on_click(200.0, 100.0)
+        assert win.tools.selection == dims
+        assert any("left out by the selection filter" in s for s in said)
+        win.tools.clear_selection()
+        assert win.tools.select_all() == len(dims), "Ctrl+A ignored the filter"
+        win.set_pick_filter(None)
+        win.tools.clear_selection()
+        assert win.tools.select_all() == 4
+        assert not win._pick_filter_btn.isChecked()
+    finally:
+        win.document.dirty = False
+        win.close()
+
+
+def test_the_popup_lists_the_types_present_and_ticking_all_switches_it_off(qapp):
+    from PySide6.QtCore import Qt
+
+    from views.pick_filter_popup import PickFilterPopup
+
+    win = _window(qapp)
+    try:
+        _drawing_with_dimensions(win)
+        popup = PickFilterPopup(win)
+        items = popup._items()
+        assert [i.data(Qt.UserRole) for i in items] == ["Circle", "Dimension", "Line"]
+        assert all(i.checkState() == Qt.Checked for i in items)
+        popup.none_btn.click()
+        items[1].setCheckState(Qt.Checked)           # Dimension only
+        assert win.tools.pick_filter == frozenset({"Dimension"})
+        popup.all_btn.click()
+        assert win.tools.pick_filter is None
+        popup.deleteLater()
+    finally:
+        win.document.dirty = False
+        win.close()
+
+
+def test_a_dimension_is_a_cota_in_spanish_not_the_menu_word(qapp):
+    from core import i18n, pickfilter
+
+    i18n.set_language("es")
+    try:
+        assert pickfilter.display("Dimension") == "Cota"
+        assert pickfilter.display("Line") == "Línea"
+    finally:
+        i18n.set_language("en")
+    assert pickfilter.display("Dimension") == "Dimension"
