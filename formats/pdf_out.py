@@ -23,9 +23,6 @@ PAPER_SIZES_MM = {
     "Letter": (215.9, 279.4),
 }
 
-# Common metric plot scales (denominators of 1:N).
-COMMON_SCALES = (10, 20, 25, 50, 75, 100, 125, 200, 250, 500, 1000, 2000)
-
 
 class _PlotRenderContext:
     """Built by :func:`_plot_context`: ezdxf's RenderContext with a .ctb's

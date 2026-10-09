@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QLabel,
     QPushButton,
 )
 
@@ -60,13 +61,31 @@ class PrintDialog(QDialog):
         self.pick_btn.setToolTip(tr("Pick two corners of the area to plot"))
         self.pick_btn.clicked.connect(self._pick_window)
         self.area.currentIndexChanged.connect(self._on_area_changed)
+        from core import units as unit_info
+
         self.scale = QComboBox(self)
         self.scale.addItem(tr("Fit to paper"), None)
-        for n in pdf_out.COMMON_SCALES:
-            self.scale.addItem(f"1:{n}", n)
+        for num, den in unit_info.STANDARD_SCALES:
+            self.scale.addItem(unit_info.scale_text(num, den), (num, den))
+        # What one drawing unit is, in mm: the drawing's own $INSUNITS
+        # picks it (#68: a millimetre plan opened on Meters, so 1:100
+        # plotted a thousand times too small); unitless stays on Meters,
+        # what a survey plan without $INSUNITS almost always is.
         self.units = QComboBox(self)
-        self.units.addItem(tr("Meters"), 1000.0)       # 1 unit = 1000 mm
-        self.units.addItem(tr("Millimeters"), 1.0)
+        for name, mm in (("Millimeters", 1.0), ("Centimeters", 10.0),
+                         ("Meters", 1000.0), ("Inches", 25.4), ("Feet", 304.8)):
+            self.units.addItem(tr(name), mm)
+        drawing_mm = 1000.0
+        if window.document is not None:
+            code = unit_info.insunits(window.document.doc)
+            if code:
+                drawing_mm = unit_info.MM_PER_INSUNIT.get(code, 1000.0)
+        idx = self.units.findData(drawing_mm)
+        self.units.setCurrentIndex(idx if idx >= 0 else 2)
+        # AutoCAD's reading of a scale: "1 mm = 100 units"
+        self.meaning = QLabel(self)
+        self.scale.currentIndexChanged.connect(self._show_meaning)
+        self.units.currentIndexChanged.connect(self._show_meaning)
 
         # Plot style table (pen assignments): the layout's own by default,
         # as the Page Setup left it; the folder's tables to choose from.
@@ -95,8 +114,9 @@ class PrintDialog(QDialog):
         form.addRow(tr("Orientation"), self.orientation)
         form.addRow(tr("Plot area"), self.area)
         form.addRow("", self.pick_btn)
-        form.addRow(tr("Scale"), self.scale)
+        form.addRow(tr("Plot scale"), self.scale)
         form.addRow(tr("Drawing unit"), self.units)
+        form.addRow("", self.meaning)
         form.addRow(tr("Plot style table"), self.style)
 
         buttons = QDialogButtonBox(self)
@@ -113,6 +133,15 @@ class PrintDialog(QDialog):
         if state:
             self._restore(state)
         self._on_area_changed()
+        self._show_meaning()
+
+    def _show_meaning(self) -> None:
+        """AutoCAD's reading of the scale: what one paper millimetre holds
+        (1:100 on a millimetre plan: 1 mm = 100 millimeters)."""
+        mm = self._mm_per_unit()
+        self.meaning.setText("" if mm is None else tr(
+            "1 mm on paper = {n:g} {unit}", n=1.0 / mm,
+            unit=self.units.currentText().lower()))
 
     # -- Window: leave, pick, come back -----------------------------------------
     def state(self) -> dict:
@@ -158,10 +187,12 @@ class PrintDialog(QDialog):
         self._printer_btn.setEnabled(ready)
 
     def _mm_per_unit(self):
-        n = self.scale.currentData()
-        if n is None:
+        """Paper mm per drawing unit; None to fit the page."""
+        ratio = self.scale.currentData()
+        if ratio is None:
             return None                         # fit
-        return self.units.currentData() / n     # 1:N metric
+        num, den = ratio
+        return self.units.currentData() * num / den
 
     def _area_rect(self):
         if self.area.currentData() == "view":

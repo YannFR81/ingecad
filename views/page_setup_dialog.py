@@ -32,20 +32,13 @@ from PySide6.QtWidgets import (
 
 from core import layouts as layout_ops
 from core.i18n import tr
+from core.units import STANDARD_SCALES as _SCALES   # one list with PLOT
+from core.units import scale_text as _scale_text
 
 _CUSTOM = "custom"
 
-# The metric scale list AutoCAD shows (plus enlargements). (num, den).
-_SCALES = [(1, 1), (1, 2), (1, 4), (1, 5), (1, 8), (1, 10), (1, 16),
-           (1, 20), (1, 25), (1, 30), (1, 40), (1, 50), (1, 100),
-           (1, 200), (1, 500), (1, 1000), (2, 1), (4, 1), (10, 1)]
-
 _STYLE_SHEETS = ["", "monochrome.ctb", "acad.ctb", "Grayscale.ctb",
                  "Screening 100%.ctb"]
-
-
-def _scale_text(num, den):
-    return f"{num:g}:{den:g}"
 
 
 class PageSetupDialog(QDialog):

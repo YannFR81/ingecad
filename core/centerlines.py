@@ -45,12 +45,6 @@ SETTING_MARKEXE = "center/markexe"
 DEFAULT_EXE = 3.5              # acadiso: 3.5 mm past the circle, on paper
 PAPER_TEXT_MM = 2.5            # ISO text height the annotation scale is read from
 
-#: Millimetres in one drawing unit, by $INSUNITS.
-_MM_PER_UNIT = {
-    0: 1.0, 1: 25.4, 2: 304.8, 3: 1609344.0, 4: 1.0, 5: 10.0, 6: 1000.0,
-    7: 1e6, 8: 2.54e-5, 9: 0.0254, 10: 914.4, 11: 1e-7, 12: 1e-6, 13: 1e-3,
-    14: 100.0, 15: 1e4, 16: 1e5,
-}
 DEFAULT_LTYPE = "CENTER2"
 DEFAULT_CROSSSIZE = "0.1x"
 DEFAULT_CROSSGAP = "0.05x"
@@ -143,8 +137,9 @@ def annotation_scale(drawing) -> float:
     if height > 0.0:
         return height * scale / PAPER_TEXT_MM
     try:
-        mm_per_unit = _MM_PER_UNIT.get(
-            int(drawing.header.get("$INSUNITS", 4)), 1.0)
+        from core import units
+
+        mm_per_unit = units.MM_PER_INSUNIT.get(units.insunits(drawing, 4), 1.0)
     except Exception:
         mm_per_unit = 1.0
     return scale / mm_per_unit

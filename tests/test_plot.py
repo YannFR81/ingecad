@@ -158,3 +158,75 @@ def test_a_model_space_pdf_plots_on_white_with_dark_lines(app, tmp_path):
               for y in range(0, img.height(), 3) for x in range(0, img.width(), 3)]
     assert sum(p > 240 for p in pixels) > 0.9 * len(pixels)    # white paper
     assert sum(p < 80 for p in pixels) > 0                     # dark lines on it
+
+
+def _window_with(insunits, length):
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.new_document("mm")
+    win.document.doc.header["$INSUNITS"] = insunits
+    msp = win.document.modelspace()
+    msp.add_line((0, 0), (length, 0))
+    msp.add_line((0, 0), (0, length / 10))       # so the extents have height
+    return win
+
+
+def test_the_plot_scales_include_full_size_and_enlargements(app):
+    # #68 (Rafael): Fit, then 1:10 ... 1:2000 -- no 1:1, 1:2, 1:5, 2:1, 5:1.
+    from views.print_dialog import PrintDialog
+
+    win = _window_with(4, 100.0)
+    try:
+        dialog = PrintDialog(win)
+        offered = {dialog.scale.itemText(i) for i in range(dialog.scale.count())}
+        assert {"1:1", "1:2", "1:5", "1:100", "1:1000", "2:1", "5:1"} <= offered
+    finally:
+        win.close()
+
+
+@pytest.mark.parametrize("insunits, expected", [(4, "Millimeters"), (5, "Centimeters"),
+                                                (6, "Meters"), (0, "Meters")])
+def test_the_drawing_unit_starts_on_the_drawings_own(app, insunits, expected):
+    # #68: a millimetre plan opened on Meters, and 1:100 came out tiny
+    from core.i18n import tr
+    from views.print_dialog import PrintDialog
+
+    win = _window_with(insunits, 100.0)
+    try:
+        dialog = PrintDialog(win)
+        assert dialog.units.currentText() == tr(expected)
+    finally:
+        win.close()
+
+
+def test_one_to_one_on_a_millimetre_plan_prints_true_size(app, tmp_path):
+    # the line is 100 drawing units = 100 mm; at 1:1 it must measure 100 mm
+    # on the PDF page, and the dialog must say so in AutoCAD's words
+    from PySide6.QtCore import QSize
+    from PySide6.QtPdf import QPdfDocument
+
+    from views.print_dialog import PrintDialog
+
+    win = _window_with(4, 100.0)
+    try:
+        dialog = PrintDialog(win)
+        dialog.scale.setCurrentIndex(dialog.scale.findText("1:1"))
+        assert dialog._mm_per_unit() == pytest.approx(1.0)
+        assert dialog.meaning.text().startswith("1 mm on paper = 1 ")
+        path = str(tmp_path / "full.pdf")
+        dialog._plot_on(pdf_out.make_pdf_printer(path, "A4", landscape=True))
+    finally:
+        win.close()
+    pdf = QPdfDocument()
+    pdf.load(path)
+    px_per_mm = 4
+    img = pdf.render(0, QSize(297 * px_per_mm, 210 * px_per_mm))
+    row_dark = {}
+    for y in range(img.height()):
+        xs = [x for x in range(img.width())
+              if img.pixelColor(x, y).alpha() > 0 and img.pixelColor(x, y).lightness() < 128]
+        if len(xs) > len(row_dark.get("xs", [])):
+            row_dark = {"y": y, "xs": xs}
+    width_mm = (max(row_dark["xs"]) - min(row_dark["xs"])) / px_per_mm
+    assert width_mm == pytest.approx(100.0, abs=1.0)
