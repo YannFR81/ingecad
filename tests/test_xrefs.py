@@ -426,3 +426,53 @@ def test_insert_browses_for_a_dwg_and_the_block_survives_save(qapp, tmp_path):
     inserts = back.modelspace().query("INSERT")
     assert [(i.dxf.name, i.dxf.insert.x, i.dxf.insert.y) for i in inserts] \
         == [("FormatoA4_horizontal", 10, 20)]
+
+
+def test_the_palette_lists_images_and_pdfs_too_and_detaches_them(qapp, tmp_path):
+    # Rafael, review 6 (55:00-58:00): images and PDFs attached fine and
+    # survived save, but the External References palette listed only the
+    # DWG references; AutoCAD's lists them all.
+    from PySide6.QtGui import QColor, QImage
+
+    from core import actions
+    from core.i18n import tr
+    from views.main_window import MainWindow
+
+    _referenced(tmp_path)
+    png = tmp_path / "foto.png"
+    img = QImage(8, 4, QImage.Format_RGB32)
+    img.fill(QColor("red"))
+    img.save(str(png))
+    win = MainWindow()
+    win.maybe_save_changes = lambda: True
+    try:
+        win.open_path(_host(tmp_path))
+        while win._open_thread is not None:
+            qapp.processEvents()
+        win.tools._execute(actions.attach_image(str(png), (8, 4), (0, 0), 1.0))
+        win.tools._execute(actions.attach_image(str(tmp_path / "plano-p1.png"),
+                                                (8, 4), (50, 0), 1.0))
+        panel = win._xrefs_panel
+        panel.refresh()
+        rows = {panel.table.item(r, 0).text(): (panel.table.item(r, 1).text(),
+                                                 panel.table.item(r, 2).text())
+                for r in range(panel.table.rowCount())}
+        assert rows["topo"] == (tr("Loaded"), tr("Attach"))
+        assert rows["foto"] == (tr("Loaded"), tr("Raster image"))
+        assert rows["plano-p1"] == (tr("Not found"), tr("PDF (as image)"))
+        r = next(r for r in range(panel.table.rowCount())
+                 if panel.table.item(r, 0).text() == "foto")
+        panel.table.selectRow(r)
+        assert panel.detach_btn.isEnabled() and not panel.unload_btn.isEnabled()
+        panel.detach_btn.click()
+        names = [panel.table.item(i, 0).text() for i in range(panel.table.rowCount())]
+        assert "foto" not in names
+        assert len(win.document.modelspace().query("IMAGE")) == 1
+        win._cmd_undo()
+        panel.refresh()
+        names = [panel.table.item(i, 0).text() for i in range(panel.table.rowCount())]
+        assert "foto" in names
+        assert len(win.document.modelspace().query("IMAGE")) == 2
+    finally:
+        win.document.dirty = False
+        win.close()

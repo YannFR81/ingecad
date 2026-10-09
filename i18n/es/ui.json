@@ -1867,5 +1867,12 @@
   "Top margin": "Margen superior",
   "Right margin": "Margen derecho",
   "Bottom margin": "Margen inferior",
-  "Left margin": "Margen izquierdo"
+  "Left margin": "Margen izquierdo",
+  "Attach DWG...": "Enlazar DWG...",
+  "Attach Image...": "Enlazar imagen...",
+  "Attach PDF...": "Enlazar PDF...",
+  "Raster image": "Imagen ráster",
+  "PDF (as image)": "PDF (como imagen)",
+  "Image detached.": "Imagen desenlazada.",
+  "Image reloaded.": "Imagen recargada."
 }

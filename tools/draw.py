@@ -2375,7 +2375,9 @@ class PdfAttachTool(Tool):
         except Exception:
             target = None
         if target is None or not target.exists():
-            cache = pathlib.Path.home() / ".cache" / "ingecad" / "pdf"
+            from core.paths import user_cache_dir
+
+            cache = user_cache_dir() / "pdf"
             cache.mkdir(parents=True, exist_ok=True)
             target = cache / f"{source.stem}-p{page + 1}.png"
             image.save(str(target))
