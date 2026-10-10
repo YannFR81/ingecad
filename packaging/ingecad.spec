@@ -134,10 +134,45 @@ exe = EXE(
     # Windows wants an .ico for the executable; elsewhere it is ignored
     icon=str(ROOT / "resources" / "icons" / ("ingecad.ico" if WINDOWS else "ingecad.png")),
 )
+# ingecad-mcp.exe (Windows): the AI bridge's MCP server as a CONSOLE
+# program of its own. MCP clients talk over stdin/stdout, and the windowed
+# ingecad.exe may have no std handles to give them; spawned with pipes,
+# this one opens no window. It is the stdlib-only script the plugin ships
+# (plugins/puente_ia/mcp_server.py), sharing this bundle's _internal/.
+# Linux needs no second program: ``ingecad --mcp`` runs the same script.
+extra_exes, extra_binaries, extra_datas = [], [], []
+if WINDOWS:
+    mcp_a = Analysis(
+        [str(ROOT / "plugins" / "puente_ia" / "mcp_server.py")],
+        pathex=[str(ROOT)],
+        binaries=[],
+        datas=[],
+        hiddenimports=[],
+        excludes=excludes,
+        noarchive=False,
+    )
+    mcp_pyz = PYZ(mcp_a.pure)
+    extra_exes.append(EXE(
+        mcp_pyz,
+        mcp_a.scripts,
+        [],
+        exclude_binaries=True,
+        name="ingecad-mcp",
+        debug=False,
+        strip=False,
+        upx=False,
+        console=True,
+        icon=str(ROOT / "resources" / "icons" / "ingecad.ico"),
+    ))
+    extra_binaries, extra_datas = mcp_a.binaries, mcp_a.datas
+
 coll = COLLECT(
     exe,
+    *extra_exes,
     a.binaries,
     a.datas,
+    extra_binaries,
+    extra_datas,
     strip=False,
     upx=False,
     name="ingecad",

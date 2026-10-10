@@ -163,6 +163,10 @@ What works today:
   arc and circle smoothness, crosshair size and colour (`CURSORSIZE`) and
   pickbox size (`PICKBOX`) — under AutoCAD's own names, typable at the
   prompt or set in **Options ▸ Display / Selection**.
+- **AI bridge (MCP)** (menu *AI*, `AIBRIDGE`): Claude or any MCP client
+draws in the open drawing, types at the command line and sees the canvas,
+from this computer only -- every call one undo step (`docs/ai-bridge.md`).
+
 - **Report a Problem** under Help: guided issue forms, Spanish welcome.
 
 Planned next (v0.5): survey-point import with elevations, coordinate

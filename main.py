@@ -224,6 +224,15 @@ def _self_check() -> int:
         print(f"  {'PROJ':<14}: MISSING  {exc}")
         problems.append("PROJ")
 
+    # ``ingecad --mcp`` (and ingecad-mcp.exe on Windows) runs the AI
+    # bridge's MCP server by path: a bundle without it still opens, and
+    # the door the AIBRIDGE window tells the user to paste is simply dead.
+    mcp_script = root / "plugins" / "puente_ia" / "mcp_server.py"
+    ok = mcp_script.is_file()
+    print(f"  {'MCP server':<14}: {'found' if ok else 'MISSING'}  {mcp_script}")
+    if not ok:
+        problems.append("MCP server")
+
     for label, finder in (("dwg2dxf", find_dwg2dxf), ("dxf2dwg", find_dxf2dwg)):
         tool = finder()
         where = "bundled" if tool and str(tool).startswith(str(root)) else "system PATH"
@@ -238,7 +247,31 @@ def _self_check() -> int:
     return 0
 
 
+def _run_mcp_server() -> int:
+    """``ingecad --mcp``: the AI bridge's stdio MCP server, from the
+    packaged app, so nobody needs Python installed to connect an MCP client
+    (docs/ai-bridge.md). The script ships as data and runs by path, so a
+    checkout, a plugin folder and the package share one file. A windowed
+    Windows exe may have no std handles; a client that spawns us with pipes
+    hands valid ones, and when none came there is nobody to talk to."""
+    import runpy
+
+    from core.paths import app_root
+
+    script = app_root() / "plugins" / "puente_ia" / "mcp_server.py"
+    if sys.stdin is None or sys.stdout is None:
+        try:
+            sys.stdin = open(0, "r", encoding="utf-8")
+            sys.stdout = open(1, "w", encoding="utf-8")
+        except OSError:
+            return 2
+    runpy.run_path(str(script), run_name="__main__")
+    return 0
+
+
 def main() -> int:
+    if "--mcp" in sys.argv[1:]:
+        return _run_mcp_server()
     # Background regens are pure-Python tessellation: with CPython's default
     # 5 ms GIL switch interval the UI thread starves in 5 ms chunks and the
     # crosshair stutters while a big drawing rebuilds. 1 ms keeps input smooth

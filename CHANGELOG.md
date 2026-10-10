@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Drawing with an AI agent
+- **AI bridge (MCP)** (AI menu, `AIBRIDGE`): Claude Desktop, Claude Code,
+  Cursor or any MCP client draws in the open drawing, types at the command
+  line, reads layers and extents, and sees the canvas -- live, from this
+  computer only. Every call is one undo step, and Python that fails is
+  rolled back whole. The packages carry the MCP server: `ingecad-mcp.exe`
+  on Windows, `ingecad --mcp` on Linux (docs/ai-bridge.md).
+- Plugins get `on_activate` and `on_deactivate` hooks, to start and let go
+  of what the host does not track.
+
 ## v0.6.6 — 2026-10-09
 
 The colleague's drawing, without scares: what stopped the people already
