@@ -239,6 +239,50 @@ def test_the_document_hook_hears_new_and_opened_drawings(qapp):
         win.close()
 
 
+def test_the_on_and_off_hooks_see_the_commands_and_never_block_the_switch():
+    """``on_activate`` runs once the plugin is on (the AI bridge starts its
+    socket there when asked to start with IngeCAD); ``on_deactivate`` lets
+    it release what the host does not track. A hook that raises is
+    reported, and the switch happens all the same."""
+    from core.plugins import PluginSpec
+
+    class Host:
+        def __init__(self):
+            self.commands, self.said = {}, []
+
+        def register_command(self, name, handler):
+            self.commands[name.upper()] = handler
+
+        def unregister_command(self, name):
+            self.commands.pop(name.upper(), None)
+
+        register_tools = unregister_tools = add_pack_dir = remove_pack_dir = \
+            add_toolbar = remove_toolbar = remove_alias = lambda *a: None
+        add_alias = lambda self, *a: True
+        menus_changed = lambda self: None
+
+        def echo(self, text):
+            self.said.append(text)
+
+    heard = []
+    for hook in (lambda ctx: heard.append(sorted(ctx.host.commands)),
+                 lambda ctx: 1 / 0):
+        host = Host()
+        manager = PluginManager(host=host, bundled_dir=FIXTURE / "x", user_dir=FIXTURE / "x")
+        spec = PluginSpec(id="cierre", name="Closing", commands={"BYE": lambda ctx: None},
+                          on_activate=hook, on_deactivate=hook)
+        from core.plugins import LoadedPlugin
+
+        manager.loaded["cierre"] = LoadedPlugin("cierre", FIXTURE, True, spec=spec)
+        assert manager.activate("cierre")      # a raising on_activate: still on
+        assert manager.is_active("cierre") and "BYE" in host.commands
+        manager.deactivate("cierre")
+        assert not manager.is_active("cierre") and host.commands == {}
+    # on_activate ran with BYE registered, on_deactivate while it still was
+    assert heard == [["BYE"], ["BYE"]]
+    assert sum("ZeroDivisionError" in s for s in host.said) == 2
+
+
 def test_the_manager_dialog_toggles_a_plugin(qapp):
     from PySide6.QtCore import QSettings, Qt
 

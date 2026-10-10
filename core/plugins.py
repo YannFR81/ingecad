@@ -82,6 +82,14 @@ class PluginSpec:
     options_page: Optional[Callable] = None
     i18n_dir: Optional[Path] = None
     on_document_open: Optional[Callable] = None
+    #: ``callable(ctx)`` once the plugin is on -- commands, menu and packs in
+    #: place -- at start-up as when the user turns it on later. A hook that
+    #: raises is reported; the plugin stays on.
+    on_activate: Optional[Callable] = None
+    #: ``callable(ctx)`` when the plugin is turned off, before its commands
+    #: go: a plugin that holds something outside the host's registries (a
+    #: listening socket, a worker thread) lets go of it here.
+    on_deactivate: Optional[Callable] = None
 
 
 @dataclass
@@ -380,6 +388,11 @@ class PluginManager:
             loaded.error = f"failed to activate: {type(exc).__name__}: {exc}"
             ctx.echo(f"{spec.name}: {loaded.error}")
             return False
+        if spec.on_activate is not None:
+            try:
+                spec.on_activate(ctx)
+            except Exception as exc:          # reported; the plugin stays on
+                ctx.echo(f"{spec.name}: {type(exc).__name__}: {exc}")
         return True
 
     def deactivate(self, plugin_id: str) -> None:
@@ -388,6 +401,13 @@ class PluginManager:
         if record is None or self.host is None:
             return
         host = self.host
+        spec = self.loaded[plugin_id].spec
+        if spec is not None and spec.on_deactivate is not None:
+            ctx = self.context()
+            try:
+                spec.on_deactivate(ctx)
+            except Exception as exc:          # turning it off always works
+                ctx.echo(f"{spec.name}: {type(exc).__name__}: {exc}")
         for name in record.commands:
             host.unregister_command(name)
         for alias in record.aliases:

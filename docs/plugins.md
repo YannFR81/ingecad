@@ -69,6 +69,8 @@ with `i18n/es/ui.json` (`{"Say hello": "Saludar", ...}`) and, optionally,
 | `i18n_dir` | `<dir>/<lang>/ui.json` strings merge after the app's catalog (the app wins a clash); `<dir>/<lang>/commands.json` adds localized command names, English always kept |
 | `requires` | module names; a missing one lists the plugin as *unavailable: needs X* instead of breaking start-up |
 | `on_document_open` | `callable(ctx, document)` after a drawing is created or opened |
+| `on_activate` | `callable(ctx)` once the plugin is on, at start-up or when turned on later; a hook that raises is reported and the plugin stays on |
+| `on_deactivate` | `callable(ctx)` when the plugin is turned off, before its commands go: release what the host does not track (a socket, a timer) |
 
 ## The rules a plugin lives by
 
